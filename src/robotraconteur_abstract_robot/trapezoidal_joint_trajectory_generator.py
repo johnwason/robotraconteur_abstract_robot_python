@@ -197,13 +197,13 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
             a3 = a_max * np.sign(vf-v1)
             t3 = (vf - v1) / a3
 
-        xf_1, vf_1 = cls.pos(a1, a3, v0, t1, 0.0, t3)
+        xf_1, vf_1 = cls.pos(a1, a3, x0, v0, t1, 0.0, t3)
 
         dx2 = xf - xf_1
 
         t2 = dx2/v1
 
-        return t2 >= 0, a1, a3, t1, t3
+        return t2 >= 0, a1, a3, t1, t2, t3
 
     @classmethod
     def solve_case2(cls, x0, xf, v0, vf, v_max, a_max):
@@ -250,7 +250,7 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
             t1 = (-v0 - np.sqrt(sub1)) / a1
             t3 = (a1 * t1 + v0 - vf) / a1
             if (t1 > 0 and t3 > 0):
-                return True
+                return True, a1, a3, t1, t3
 
         return False, None, None, None, None
 
@@ -259,8 +259,9 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
         a1_den = t1 * (t1 + 2*t2 + t3)
         a1 = (-2 * t1 * v0 - 2 * t2 * v0 - t3 * v0 - t3 * vf - 2 * x0 + 2 * xf) / a1_den if a1_den !=0 else 0.0
         v1 = a1 * t1 + v0
+        a3 = 0.0
         if t3 != 0:
-            a3 = (a1 * t1 - v0 + vf) / t3
+            a3 = (-a1 * t1 - v0 + vf) / t3
 
         return v1, a1, a3
     
