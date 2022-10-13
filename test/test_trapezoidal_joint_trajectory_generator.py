@@ -1,6 +1,8 @@
 from robotraconteur_abstract_robot import trapezoidal_joint_trajectory_generator as trap_gen
 from robotraconteur_abstract_robot.trapezoidal_joint_trajectory_generator \
     import TrapezoidalJointTrajectoryGeneratorCalc as trap_calc
+from robotraconteur_abstract_robot.trapezoidal_joint_trajectory_generator \
+    import TrapezoidalJointTrajectoryGeneratorExec as trap_exec
 import numpy as np
 import numpy.testing as nptest
 
@@ -173,3 +175,141 @@ def test_trapezoidal_joint_trajectory_generator_calc_init_vel_exec():
     )
 
     _assert_vel_exec1(vel_exec1)
+
+def test_trapezoidal_joint_trajectory_generator_exec_funcs():
+    
+    #pos_1
+    nptest.assert_allclose(trap_exec.pos_1(0.0, 1.2, 1.3, 0.143), 1.4716)
+    nptest.assert_allclose(trap_exec.pos_1(0.231, 2.8, 0.827, 0.928), 3.524866752)
+
+    #vel_1
+    nptest.assert_allclose(trap_exec.vel_1(0.7792, 0.9340, 0.1299), 1.03521808)
+
+    #pos
+    nptest.assert_allclose(trap_exec.pos(3,
+        np.array([0.88517,0.91329,0.79618]),
+        np.array([0.098712,0.26187,0.33536]),
+        np.array([0.67973,0.13655,0.72123]),
+        0.10676
+    ), [0.695312943112296,0.169711942820552,0.7615703430375841])
+
+    nptest.assert_allclose(trap_exec.pos(3,
+        None,
+        np.array([0.77905,0.71504,0.90372]),
+        np.array([0.89092,0.33416,0.69875]),
+        0.74407
+    ),[1.4705877335,0.8661998128,1.3711809404])
+
+def _assert_exec_calc_at_time(exec_, t, x, v):
+    res, x_res, v_res = exec_.calc_at_time(t)
+    assert res
+    nptest.assert_allclose(x_res, x)
+    nptest.assert_allclose(v_res, v)
+
+def test_trapezoidal_joint_trajectory_generator_exec_calc_at_time1():
+
+    pos_exec1 = trap_calc.initialize_pos_exec(
+        3, _joint_limits(), _pos_req1()
+    )
+    
+    _assert_exec_calc_at_time(pos_exec1, 0.0, [0.31878,0.42417,-0.50786], [0.085516,-0.26248,0.80101])
+    _assert_exec_calc_at_time(pos_exec1, 0.1, [0.32728176592901587,0.3979321306479203,-0.42830904399999997], 
+        [0.08451931858031693,-0.2622773870415934,0.79000912])
+    _assert_exec_calc_at_time(pos_exec1, 12.1, [0.6239029667210094,-2.6035151837984847,1.1311667960000014], 
+        [-0.03508245178165133,-0.2379638320328074,-0.5300964799999999])
+    _assert_exec_calc_at_time(pos_exec1, 12.8, [0.5970390570643156,-2.769621045733643,0.7346446298101615], 
+        [-0.04041468034412686,-0.236879856167895,-0.588951])
+    _assert_exec_calc_at_time(pos_exec1,  14.2, [0.5404585045825381,-3.1012528443686955,-0.0898867701898376], 
+        [-0.04041468034412686,-0.236879856167895,-0.588951])
+    _assert_exec_calc_at_time(pos_exec1,  15.2, [0.5012391589681557,-3.3181220194263843,-0.6561912614416291], 
+        [-0.03668889680472066,-0.17450781556914718,-0.5183632496238911])
+    _assert_exec_calc_at_time(pos_exec1,  24.4, [0.40943311001054206,-0.8098836798235243,-0.7695607419814292], 
+        [0.01673106007480464,0.7197770198306386,0.49371771037610857])
+    _assert_exec_calc_at_time(pos_exec1,  27, [0.47197419961666603,1.3802841414763947,0.8748386347036179], 
+        [0.02922,0.92885,0.73033])
+    _assert_exec_calc_at_time(pos_exec1,  29, [0.530414199616666,3.2379841414763932,2.3354986347036166], 
+        [0.02922,0.92885,0.73033])
+
+def test_trapezoidal_joint_trajectory_generator_exec_calc_at_time2():
+
+    pos_exec2 = trap_calc.initialize_pos_exec(
+        3, _joint_limits(), _pos_req2()
+    )
+    
+    _assert_exec_calc_at_time(pos_exec2, 0, [0.31878,0.42417,-0.50786], [0,0,0])
+    _assert_exec_calc_at_time(pos_exec2, 0.105, [0.3192862625158662,0.426589270875,-0.507918095698542], 
+        [0.009643095540308736,0.04608135,-0.0011065847341340197])
+    _assert_exec_calc_at_time(pos_exec2, 0.125, [0.31948877384780316,0.42755700945302655,-0.5079413347038463], 
+        [0.009690252960812922,0.046306700624212625,-0.0011119962414049929])
+    _assert_exec_calc_at_time(pos_exec2, 0.21, [0.31998067694338306,0.42990766113108464,-0.5079977826000603], 
+        [0.0018839375234201358,0.00900275062421263,-0.0002161895518679295])
+    _assert_exec_calc_at_time(pos_exec2, 0.3, [0.32,0.43,-0.508], [0,0,0])
+    _assert_exec_calc_at_time(pos_exec2, 0.5, [0.32,0.43,-0.508], [0,0,0])
+    
+def test_trapezoidal_joint_trajectory_generator_exec_calc_at_time2():
+
+    vel_exec1 = trap_calc.initialize_vel_exec(
+        3, _joint_limits(), _vel_req1()
+    )
+    
+    _assert_exec_calc_at_time(vel_exec1, 0, [0.52114,0.23159,0.4889], [-0.2406,0.124,0.1429])
+    _assert_exec_calc_at_time(vel_exec1, 1, [0.44454000000000005,0.4322566666666666,0.6272627333333334], 
+        [0.0874,0.2773333333333333,0.13382546666666664])
+    _assert_exec_calc_at_time(vel_exec1, 1.3, [0.48388000000000014,0.52159,0.667047392], 
+        [0.153,0.308,0.13201055999999997])
+    _assert_exec_calc_at_time(vel_exec1, 1.9, [0.5756800000000001,0.70639,0.7462537279999999], 
+        [0.153,0.308,0.13201055999999997])
+    _assert_exec_calc_at_time(vel_exec1, 2.1, [0.6055664989671267,0.7665536711233659,0.772040221235881], 
+        [0.13951138393374932,0.28084644608885484,0.12037239163051794])
+    _assert_exec_calc_at_time(vel_exec1, 3.2, [0.6818936607204993,0.9202057353066257,0.8378963739566214], [0,0,0])
+    _assert_exec_calc_at_time(vel_exec1, 4, [0.6818936607204993,0.9202057353066257,0.8378963739566214], [0,0,0])
+
+
+def _assert_gen_command_at_time(gen1, t, x, v):
+    res, cmd = gen1.get_command(t)
+    assert res
+    nptest.assert_allclose(cmd.command_position, x)
+    nptest.assert_allclose(cmd.command_velocity, v)
+
+
+def test_trapezoidal_joint_trajectory_generator_exec1():
+
+    gen1 = trap_gen.TrapezoidalJointTrajectoryGenerator(3, _joint_limits())
+
+    gen1.update_desired_position(_pos_req1())
+
+    _assert_gen_command_at_time(gen1, 0.0, [0.31878,0.42417,-0.50786], [0.085516,-0.26248,0.80101])
+    _assert_gen_command_at_time(gen1, 0.1, [0.32728176592901587,0.3979321306479203,-0.42830904399999997], 
+        [0.08451931858031693,-0.2622773870415934,0.79000912])
+    _assert_gen_command_at_time(gen1, 12.1, [0.6239029667210094,-2.6035151837984847,1.1311667960000014], 
+        [-0.03508245178165133,-0.2379638320328074,-0.5300964799999999])
+    _assert_gen_command_at_time(gen1, 12.8, [0.5970390570643156,-2.769621045733643,0.7346446298101615], 
+        [-0.04041468034412686,-0.236879856167895,-0.588951])
+    _assert_gen_command_at_time(gen1,  14.2, [0.5404585045825381,-3.1012528443686955,-0.0898867701898376], 
+        [-0.04041468034412686,-0.236879856167895,-0.588951])
+    _assert_gen_command_at_time(gen1,  15.2, [0.5012391589681557,-3.3181220194263843,-0.6561912614416291], 
+        [-0.03668889680472066,-0.17450781556914718,-0.5183632496238911])
+    _assert_gen_command_at_time(gen1,  24.4, [0.40943311001054206,-0.8098836798235243,-0.7695607419814292], 
+        [0.01673106007480464,0.7197770198306386,0.49371771037610857])
+    _assert_gen_command_at_time(gen1,  27, [0.47197419961666603,1.3802841414763947,0.8748386347036179], 
+        [0.02922,0.92885,0.73033])
+    _assert_gen_command_at_time(gen1,  29, [0.530414199616666,3.2379841414763932,2.3354986347036166], 
+        [0.02922,0.92885,0.73033])
+
+def test_trapezoidal_joint_trajectory_generator_exec_calc_at_time2():
+
+    gen2 = trap_gen.TrapezoidalJointTrajectoryGenerator(3, _joint_limits())
+
+    gen2.update_desired_velocity(_vel_req1())
+    
+    _assert_gen_command_at_time(gen2, 0, [0.52114,0.23159,0.4889], [-0.2406,0.124,0.1429])
+    _assert_gen_command_at_time(gen2, 1, [0.44454000000000005,0.4322566666666666,0.6272627333333334], 
+        [0.0874,0.2773333333333333,0.13382546666666664])
+    _assert_gen_command_at_time(gen2, 1.3, [0.48388000000000014,0.52159,0.667047392], 
+        [0.153,0.308,0.13201055999999997])
+    _assert_gen_command_at_time(gen2, 1.9, [0.5756800000000001,0.70639,0.7462537279999999], 
+        [0.153,0.308,0.13201055999999997])
+    _assert_gen_command_at_time(gen2, 2.1, [0.6055664989671267,0.7665536711233659,0.772040221235881], 
+        [0.13951138393374932,0.28084644608885484,0.12037239163051794])
+    _assert_gen_command_at_time(gen2, 3.2, [0.6818936607204993,0.9202057353066257,0.8378963739566214], [0,0,0])
+    _assert_gen_command_at_time(gen2, 4, [0.6818936607204993,0.9202057353066257,0.8378963739566214], [0,0,0])

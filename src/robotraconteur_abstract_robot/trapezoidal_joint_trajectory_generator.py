@@ -26,7 +26,7 @@ class JointTrajectoryVelocityRequest(NamedTuple):
     timeout: float
     speed_ratio: float
 
-class JointTrajectoryPositionCommand:
+class JointTrajectoryPositionCommand(NamedTuple):
     command_position: np.array
     command_velocity: np.array
 
@@ -69,7 +69,9 @@ class TrapezoidalJointTrajectoryGenerator:
         if self._exec is None:
             return False, None
 
-        command_position, command_velocity = self._exec.calc_at_time(t)
+        res, command_position, command_velocity = self._exec.calc_at_time(t)
+        if not res:
+            return False, None
         command = JointTrajectoryPositionCommand(
             command_position = command_position,
             command_velocity = command_velocity
@@ -376,6 +378,8 @@ class TrapezoidalJointTrajectoryGeneratorExec:
         self.a3 = a3
         self.xf = xf
         self.t_final = t1 + t2 +t3
+        self.x2 = None
+        self.x3 = None
 
     @staticmethod
     def pos_1(a, v, x, t):
@@ -427,7 +431,7 @@ class TrapezoidalJointTrajectoryGeneratorExec:
 
         if (t < self.t2 + self.t1):
             x = self.pos(self.joint_count, None, self.v2, self.x2, t - self.t1)
-            v = self.vel(self.joint_count, self.v2, t - self.t1)
+            v = self.vel(self.joint_count, None, self.v2, t - self.t1)
             return True, x, v
 
         if (t < self.t_final):
