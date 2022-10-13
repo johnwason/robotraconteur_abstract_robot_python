@@ -24,7 +24,7 @@ class JointTrajectoryVelocityRequest(NamedTuple):
     current_velocity: np.array
     desired_velocity: np.array
     timeout: float
-    speed_ration: float
+    speed_ratio: float
 
 class JointTrajectoryPositionCommand:
     command_position: np.array
@@ -102,11 +102,11 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
             if request.max_velocity is not None:
                 req_vel = request.max_velocity * request.speed_ratio
                 assert np.all(req_vel <= v_max), "req_vel must be less than or equal to v_max"
-                v_max = np.min(req_vel,v_max)
+                v_max = np.minimum(req_vel,v_max)
 
         else:            
             assert np.all(request.max_velocity <= v_max), "req_vel must be less than or equal to v_max"
-            v_max = np.min(request.max_velocity,v_max)
+            v_max = np.minimum(request.max_velocity,v_max)
 
         dx = request.desired_position - request.current_position
 
@@ -134,12 +134,14 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
                     request.current_position[i], request.desired_position[i], request.current_velocity[i],
                     request.desired_velocity[i], a_max[i]
                 )
+                t2[i] = 0
+                v1[i] = 0
 
                 assert case3_success, "Invalid trajectory request"
 
         t1_4 = np.max(t1)
-        t2_4 = np.max(t2_4)
-        t3_4 = np.max(t3_4)
+        t2_4 = np.max(t2)
+        t3_4 = np.max(t3)
 
         a1_4 = np.zeros((joint_count,))
         a3_4 = np.zeros((joint_count,))
@@ -275,11 +277,11 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
 
             req_vel = request.desired_velocity * request.speed_ratio
             assert np.all(req_vel <= v_max), "req_vel must be less than or equal to v_max"
-            v_max = np.min(v_max, req_vel)
+            v_max = np.minimum(v_max, req_vel)
 
         else:
             assert np.all(request.max_velocity <= v_max), "req_vel must be less than or equal to v_max"
-            v_max = np.min(request.max_velocity,v_max)
+            v_max = np.minimum(request.max_velocity,v_max)
 
         t1 = np.zeros((joint_count,))
         t2 = np.zeros((joint_count,))
@@ -293,7 +295,7 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
             if request.desired_velocity[i] == 0 and request.current_velocity[i] == 0:
                 continue
 
-            v1[i], a1[i], a3[i], t1[i], t2[i], t3[i] = cls.solve_case5(request.current_velocity[i], 
+            a_max[i], v1[i], a1[i], a3[i], t1[i], t2[i], t3[i] = cls.solve_case5(request.current_velocity[i], 
                 request.desired_velocity[i], 0, request.timeout, a_max[i])
 
         t1_4 = np.max(t1)

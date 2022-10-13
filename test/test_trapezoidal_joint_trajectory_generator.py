@@ -69,5 +69,107 @@ def test_trapezoidal_joint_trajectory_generator_calc_cases():
     nptest.assert_allclose(trap_calc.solve_case6(0.22592,0.17071,0.22766,0.4357,0.3111,0.0),
         (-0.12671563002065644, 0))
 
+def _joint_limits():
+    return trap_gen.JointTrajectoryLimits(
+        j_max = np.array([0.43021,0.18482,0.90488]),
+        a_max = np.array([0.97975,0.43887,0.11112]),
+        v_max = np.array([0.25806,0.40872,0.5949]),
+        x_min = np.array([-1.26221,-1.60284,-1.71122]),
+        x_max = np.array([1.22175,1.11742,1.29668])
+    )
+
+def _pos_req1():
+    return trap_gen.JointTrajectoryPositionRequest(
+        current_position = np.array([0.31878,0.42417,-0.50786]),
+        current_velocity = np.array([0.085516,-0.26248,0.80101]),
+        desired_position = np.array([0.45885,0.96309,0.54681]),
+        desired_velocity = np.array([0.02922,0.92885,0.73033]),
+        max_velocity = np.array([0.25806,0.30872,0.5949]),
+        desired_time = None,
+        speed_ratio = 0.99,
+        splice_time = None
+    )
     
+def _pos_req2():
+    return trap_gen.JointTrajectoryPositionRequest(
+        current_position = np.array([0.31878,0.42417,-0.50786]),
+        current_velocity = np.array([0.,0.,0.]),
+        desired_position = np.array([0.32,0.43,-0.508]),
+        desired_velocity = np.array([0.,0.,0.]),
+        max_velocity = np.array([0.25806,0.30872,0.5949]),
+        desired_time = None,
+        speed_ratio = 1,
+        splice_time = None
+    )
+
+def _assert_pos_exec1(exec1):
+    nptest.assert_allclose(exec1.joint_count, 3)
+    nptest.assert_allclose(exec1.t1, 12.63499829104581)
+    nptest.assert_allclose(exec1.t2, 1.9233462197923337)
+    nptest.assert_allclose(exec1.t3, 11.992504236024757)
+    nptest.assert_allclose(exec1.x1, [0.31878,0.42417,-0.50786])
+    nptest.assert_allclose(exec1.v1, [0.085516,-0.26248,0.80101])
+    nptest.assert_allclose(exec1.v2, [-0.04041468034412686,-0.236879856167895,-0.588951])
+    nptest.assert_allclose(exec1.v3, [0.02922,0.92885,0.73033])
+    nptest.assert_allclose(exec1.a1, [-0.009966814196830688,0.0020261295840655036,-0.11000879999999999])
+    nptest.assert_allclose(exec1.a3, [0.005806517052122316,0.0972048734130202,0.11000879999999999])
+    nptest.assert_allclose(exec1.xf, [0.45885,0.96309,0.54681])
+
+def _assert_pos_exec2(exec2):
+    nptest.assert_allclose(exec2.joint_count, 3)
+    nptest.assert_allclose(exec2.t1, 0.11525673960878235)
+    nptest.assert_allclose(exec2.t2, 0.)
+    nptest.assert_allclose(exec2.t3, 0.11525673960878235)
+    nptest.assert_allclose(exec2.x1, [0.31878,0.42417,-0.50786])
+    nptest.assert_allclose(exec2.v1, [0.,0.,0.])
+    nptest.assert_allclose(exec2.v2, [0.010585064302018804,0.050582725312106315,-0.0012146795100679844])
+    nptest.assert_allclose(exec2.v3, [0,0,0])
+    nptest.assert_allclose(exec2.a1, [0.09183900514579749,0.43887000000000004,-0.010538902229847807])
+    nptest.assert_allclose(exec2.a3, [-0.09183900514579749,-0.43887000000000004,0.010538902229847807])
+    nptest.assert_allclose(exec2.xf, [0.32,0.43,-0.508])
     
+
+
+def test_trapezoidal_joint_trajectory_generator_calc_init_pos_exec():
+    pos_exec1 = trap_calc.initialize_pos_exec(
+        3, _joint_limits(), _pos_req1()
+    )
+
+    _assert_pos_exec1(pos_exec1)
+
+    pos_exec2 = trap_calc.initialize_pos_exec(
+        3, _joint_limits(), _pos_req2()
+    )
+
+    _assert_pos_exec2(pos_exec2)
+
+
+def _vel_req1():
+    return trap_gen.JointTrajectoryVelocityRequest(
+        current_position = np.array([0.52114,0.23159,0.4889]),
+        current_velocity = np.array([-0.2406,0.124,0.1429]),
+        desired_velocity = np.array([0.153,0.308,0.4949]),
+        timeout = 1.2,
+        speed_ratio = 0.99
+    )
+
+def _assert_vel_exec1(exec2):
+    nptest.assert_allclose(exec2.joint_count, 3)
+    nptest.assert_allclose(exec2.t1, 1.2)
+    nptest.assert_allclose(exec2.t2, 0.7942069328137202)
+    nptest.assert_allclose(exec2.t3, 1.2)
+    nptest.assert_allclose(exec2.x1, [0.52114,0.23159,0.4889])
+    nptest.assert_allclose(exec2.v1, [-0.2406,0.124,0.1429])
+    nptest.assert_allclose(exec2.v2, [0.153,0.308,0.13201055999999997])
+    nptest.assert_allclose(exec2.v3, [0,0,0])
+    nptest.assert_allclose(exec2.a1, [0.328,0.15333333333333335,-0.009074533333333357])
+    nptest.assert_allclose(exec2.a3, [-0.1275,-0.2566666666666667,-0.11000879999999998])
+    assert exec2.xf is None
+
+def test_trapezoidal_joint_trajectory_generator_calc_init_vel_exec():
+
+    vel_exec1 = trap_calc.initialize_vel_exec(
+        3, _joint_limits(), _vel_req1()
+    )
+
+    _assert_vel_exec1(vel_exec1)
