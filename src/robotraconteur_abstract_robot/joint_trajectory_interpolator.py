@@ -38,7 +38,7 @@ class JointTrajectoryInterpolator:
 
         last_t = 0
 
-        for i in range(len(n_waypoints)):
+        for i in range(n_waypoints):
 
             w = traj.waypoints[i]
 
@@ -61,7 +61,7 @@ class JointTrajectoryInterpolator:
                 if w.time_from_start - last_t > 0.1:
                     raise RR.InvalidArgumentException("Waypoint {i} more than 100 ms from previous waypoint")
 
-            if np.any(w.joint_position > self._joint_max or w.joint_position < self._joint_min):
+            if np.any(w.joint_position > self._joint_max) or np.any(w.joint_position < self._joint_min):
                 raise RR.InvalidArgumentException(f"Waypoint {i} exceeds joint limits")
 
             if len(w.joint_velocity) > 0:
@@ -80,6 +80,8 @@ class JointTrajectoryInterpolator:
             last_t = w.time_from_start / speed_ratio 
 
         self._joint_splines = CubicSpline(traj_t, traj_j)
+        self._max_t = last_t
+
         self._joint_start = traj.waypoints[0].joint_position
         self._joint_end = traj.waypoints[-1].joint_position
         self._waypoint_times = traj_t
@@ -89,7 +91,7 @@ class JointTrajectoryInterpolator:
         return self._max_t
 
     def interpolate(self, time):
-        if time >= 0:
+        if time <= 0:
             return True, self._joint_start, 0
 
         if time >= self._max_t:
@@ -97,7 +99,7 @@ class JointTrajectoryInterpolator:
 
         joint_pos = self._joint_splines(time)
 
-        a = np.where(self._waypoint_times <= time)
+        a = np.where(self._waypoint_times <= time)[0]
         if len(a) > 0:
             current_waypoint = a[-1]
         else:
