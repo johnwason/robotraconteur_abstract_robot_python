@@ -29,7 +29,7 @@ class AbstractRobot(ABC):
         if robot_info.joint_info is not None:
             j_names = []
             for j_info in robot_info.joint_info:
-                j_names.push_back(j_info.joint_identifier.name)
+                j_names.append(j_info.joint_identifier.name)
             self._joint_names = j_names
         else:
             assert default_joint_count > 0, "Joints must be specified in RobotInfo structure"
@@ -54,26 +54,26 @@ class AbstractRobot(ABC):
         self._robot_joint_command_type = self._node.GetStructureType("com.robotraconteur.robotics.robot.RobotJointCommand")
         self._isoch_info_type = self._node.GetStructureType("com.robotraconteur.device.isoch.IsochInfo")
 
-        self._robot_consts = RRN.GetConstants("com.robotraconteur.robotics.robot")
+        self._robot_consts = self._node.GetConstants("com.robotraconteur.robotics.robot")
         self._robot_capabilities = self._robot_consts["RobotCapabilities"]
         self._robot_command_mode = self._robot_consts["RobotCommandMode"]
         self._robot_operational_mode = self._robot_consts["RobotOperationalMode"]
         self._robot_controller_state = self._robot_consts["RobotControllerState"]
         self._robot_state_flags = self._robot_consts["RobotStateFlags"]
 
-        self._joint_consts = RRN.GetConstants("com.robotraconteur.robotics.joints")
+        self._joint_consts = self._node.GetConstants("com.robotraconteur.robotics.joints")
         self._joint_position_units = self._joint_consts["JointPositionUnits"]
         self._joint_effort_units = self._joint_consts["JointEffortUnits"]
 
         self._uses_homing = (self._robot_caps & self._robot_capabilities["homing_command"]) != 0
         self._has_position_command = (self._robot_caps & self._robot_capabilities["position_command"]) != 0
         self._has_velocity_command = (self._robot_caps & self._robot_capabilities["velocity_command"]) != 0
-        self._has_jog_command = True
+        self._has_jog_command = (self._robot_caps & self._robot_capabilities["jog_command"]) != 0
 
         try:
             self._rox_robots = []
-            for chain in self._robot_info.chains:
-                self._rox_robots.append(self._robot_util.robot_info_to_rox_robot(chain))
+            for chain_i in range(len(self._robot_info.chains)):
+                self._rox_robots.append(self._robot_util.robot_info_to_rox_robot(self._robot_info,chain_i))
         except:
             traceback.print_exc()
             raise ValueError("invalid robot_info, could not populate GeneralRoboticsToolbox.Robot")
@@ -168,6 +168,10 @@ class AbstractRobot(ABC):
         self._jog_trajectory_generator = None
         self._jog_completion_handler = None
 
+        self._joint_position_command = None
+        self._joint_velocity_command = None
+
+        self._config_seqno = 1
 
     def RRServiceObjectInit(self, context, service_path):
         self.robot_state_sensor_data.MaxBacklog = 3
@@ -180,13 +184,16 @@ class AbstractRobot(ABC):
 
         self._wires_ready = True
 
+    def _perf_counter(self):
+        return time.perf_counter()
+
     def _stopwatch_ellapsed_s(self):
-        return time.perf_counter() - self._stopwatch_start
+        return self._perf_counter() - self._stopwatch_start
 
     def _start_robot(self):
 
         self._stopwatch_epoch = self._datetime_util.TimeSpec2Now()
-        self._stopwatch_start = time.perf_counter()
+        self._stopwatch_start = self._perf_counter()
 
         self._keep_going = True
         self._loop_thread = threading.Thread(target = self._loop_thread_func)
@@ -306,7 +313,7 @@ class AbstractRobot(ABC):
             return self._endpoint_pose[chain]
 
         endpoint_transform = self._geometry_util.pose_to_rox_transform(self._endpoint_pose[chain])
-        tool_transform = self._geometry_util.pose_to_rox_transform(self._current_tool[chain].tcp)
+        tool_transform = self._geometry_util.transform_to_rox_transform(self._current_tool[chain].tcp)
         res = endpoint_transform * tool_transform
         return self._geometry_util.rox_transform_to_pose(res)
 
@@ -327,24 +334,24 @@ class AbstractRobot(ABC):
         if self._current_tool[chain] is None:
             return self._endpoint_vel[chain]
 
-        endpoint_vel_lin = self._endpoint_vel[chain]["linear"].flatten()
-        endpoint_vel_ang = self._endpoint_vel[chain]["angular"].flatten()
-        current_tool_p = self._current_tool[chain].tcp["translation"].flatten()
+        endpoint_vel = self._geometry_util.spatial_velocity_to_array(self._endpoint_vel).flatten()
+        endpoint_vel_ang = endpoint_vel[0:3]
+        endpoint_vel_lin = endpoint_vel[3:7]
+        current_tool_p = self._geometry_util.point_to_xyz(self._current_tool[chain].tcp["translation"])
 
         endpoint_transform = self._geometry_util.pose_to_rox_transform(self._endpoint_pose[chain])
 
-        o = np.zeros((1,),dtype=self._spatial_velocity_dtype)
-        o["linear"] = endpoint_vel_lin + np.cross(endpoint_vel_ang, np.matmul(endpoint_transform.R, current_tool_p))
-        o["angular"] = self._endpoint_vel[chain]["angular"]
+        
+        vel = endpoint_vel_lin + np.cross(endpoint_vel_ang, np.matmul(endpoint_transform.R, current_tool_p))
 
-        return o
+        return self._geometry_util.array_to_spatial_acceleration(np.concatenate((endpoint_vel_ang, vel)))
 
     def _calc_endpoint_vels(self):
 
         if self._endpoint_vel is None:
             return np.zeros((0,),dtype=self._spatial_velocity_dtype)
 
-        n = len(self._endpoint_pose)
+        n = len(self._endpoint_vel)
         o = np.zeros((n,),dtype=self._spatial_velocity_dtype)
         for i in range(n):
             o[i] = self._calc_endpoint_vel(i)
@@ -352,7 +359,7 @@ class AbstractRobot(ABC):
         return o
 
     def _fill_states(self, now):
-        ts = self._datetime_util.TimeSpec3Now(self._node)
+        ts = self._datetime_util.TimeSpec3Now()
 
         rob_state = self._robot_state_type()               
         rob_state.ts = ts
@@ -368,10 +375,13 @@ class AbstractRobot(ABC):
         rob_state.joint_position = np.copy(self._joint_position)
         rob_state.joint_velocity = np.copy(self._joint_velocity)
         rob_state.joint_effort = np.copy(self._joint_effort)
-        rob_state.joint_position_command = self._joint_position_command or np.zeros((0,))
-        rob_state.joint_velocity_command = self._joint_velocity_command or np.zeros((0,))
+        rob_state.joint_position_command = self._joint_position_command if self._joint_position_command is not None \
+                else np.zeros((0,))
+        rob_state.joint_velocity_command = self._joint_velocity_command if self._joint_velocity_command is not None \
+                else np.zeros((0,))
         rob_state.kin_chain_tcp = self._calc_endpoint_poses()
         rob_state.kin_chain_tcp_vel = self._calc_endpoint_vels()
+        rob_state.trajectory_running = self._trajectory_valid
 
         a_rob_state = self._advanced_robot_state_type()
         a_rob_state.ts = ts
@@ -379,6 +389,7 @@ class AbstractRobot(ABC):
         a_rob_state.command_mode = rob_state.command_mode
         a_rob_state.operational_mode = rob_state.operational_mode
         a_rob_state.controller_state = rob_state.controller_state
+        a_rob_state.robot_state_flags = rob_state.robot_state_flags
         a_rob_state.joint_position = rob_state.joint_position
         a_rob_state.joint_velocity = rob_state.joint_velocity
         a_rob_state.joint_effort = rob_state.joint_effort
@@ -387,12 +398,13 @@ class AbstractRobot(ABC):
         a_rob_state.kin_chain_tcp = rob_state.kin_chain_tcp
         a_rob_state.kin_chain_tcp_vel = rob_state.kin_chain_tcp_vel
         a_rob_state.trajectory_running = rob_state.trajectory_running
-        a_rob_state.joint_position_units = [self._joint_position_units["radian"]]*7
-        a_rob_state.joint_effort_units = [self._joint_effort_units["netwon_meter"]]*7
+        a_rob_state.joint_position_units = [self._joint_position_units["radian"]]*self._joint_count
+        a_rob_state.joint_effort_units = [self._joint_effort_units["newton_meter"]]*self._joint_count
         a_rob_state.trajectory_running = self._trajectory_valid
-        a_rob_state.trajectory_time = self._trajectory_time
+        a_rob_state.trajectory_time = self._trajectory_current_time
         a_rob_state.trajectory_max_time = self._trajectory_max_time
         a_rob_state.trajectory_current_waypoint = self._trajectory_waypoint
+        a_rob_state.config_seqno = self._config_seqno
 
         sensor_data_header = self._sensor_data_util.FillSensorDataHeader(self._robot_info.device_info, self._state_seqno)
 
@@ -426,6 +438,13 @@ class AbstractRobot(ABC):
 
     def async_enable(self, handler):
         self._send_enable(handler)
+
+    @abstractmethod
+    def _send_reset_errors(self, handler):
+        pass
+
+    def async_send_reset_errors(self, handler):
+        self._send_reset_errors(handler)
 
     def _verify_communication(self, now):
         if (now - self._last_joint_state) > self._communication_timeout \
@@ -545,7 +564,7 @@ class AbstractRobot(ABC):
 
             if pos_cmd is None \
                 or pos_cmd.seqno < self._wire_position_command_last_seqno \
-                or abs(pos_cmd.stat_seqno - self._state_seqno) > 10 \
+                or abs(pos_cmd.state_seqno - self._state_seqno) > 10 \
                 or len(pos_cmd.command) != self._joint_count \
                 or len(pos_cmd.units) != 0 and len(pos_cmd.units) != self._joint_count:
                     return True, None, None
@@ -661,6 +680,9 @@ class AbstractRobot(ABC):
         else:
             return True, None, None
 
+    @abstractmethod
+    def _send_robot_command(self, joint_pos_cmd, joint_vel_cmd):
+        pass
                         
     @property
     def command_mode(self):
@@ -756,7 +778,7 @@ class AbstractRobot(ABC):
 
                 limits = JointTrajectoryLimits(
                     x_min = limits_x_min,
-                    x_max = limits_x_min,
+                    x_max = limits_x_max,
                     v_max = limits_v_max,
                     a_max = limits_a_max,
                     j_max = None
@@ -1000,7 +1022,7 @@ class AbstractRobot(ABC):
                 device_name = ""
 
             self.tool_changed.fire(chain, device_name)
-            self._state_seqno+=1
+            self._config_seqno+=1
 
     def tool_detached(self, chain, tool_name):
 
@@ -1027,7 +1049,7 @@ class AbstractRobot(ABC):
             self._current_tool[chain] = None
 
             self.tool_changed.fire(chain, "")
-            self._state_seqno+=1
+            self._config_seqno+=1
 
     def payload_attached(self, chain, payload):
         if payload is None:
@@ -1052,7 +1074,7 @@ class AbstractRobot(ABC):
                 device_name = ""
 
             self.payload_changed.fire(chain, device_name)
-            self._state_seqno+=1
+            self._config_seqno+=1
     
     def payload_detached(self, chain, payload_name):
         
@@ -1076,7 +1098,7 @@ class AbstractRobot(ABC):
             
             self._current_payload[chain] = None
             self.payload_changed.fire(chain, "")
-            self._state_seqno+=1
+            self._config_seqno+=1
 
     def getf_param(self, param_name):
         raise RR.InvalidArgumentException("Invalid parameter")
