@@ -1,13 +1,14 @@
+import os
 import numpy as np
 from robotraconteur_abstract_robot import AbstractRobot
 import RobotRaconteur as RR
 import RobotRaconteurCompanion as RRC
-import os
 import numpy.testing as nptest
 import time
 from RobotRaconteurCompanion.Util.UuidUtil import UuidUtil
 import general_robotics_toolbox as rox
 from RobotRaconteurCompanion.Util.GeometryUtil import GeometryUtil
+
 
 class TestRobot(AbstractRobot):
 
@@ -30,10 +31,18 @@ def _get_absolute_path(fname):
     dirname = os.path.dirname(os.path.realpath(__file__))
     return dirname + "/" + fname
 
-def _new_test_node():
+def _new_test_node(std_robdef=False,server=False,nodename=None):
     node = RR.RobotRaconteurNode()
+    if nodename is not None:
+        node.SetNodeName(nodename)
     node.Init()
-    RRC.RegisterStdRobDefServiceTypes(node)
+    if std_robdef:
+        RRC.RegisterStdRobDefServiceTypes(node)
+    t = RR.IntraTransport(node)
+    node.RegisterTransport(t)
+    if server:
+        t.StartServer()
+    node.SetLogLevelFromString("WARNING")
     return node
 
 def _init_test_robot_obj(node):    
@@ -47,8 +56,10 @@ def _init_test_robot_obj(node):
 
 class _test_robot_container:
     def __init__(self):
-        self.node = _new_test_node()
+        self.node = _new_test_node(True,True,"robot")
+        self.client_node = _new_test_node()
         self.robot_obj = _init_test_robot_obj(self.node)
+        self.node.RegisterService("robot", "com.robotraconteur.robotics.robot.Robot", self.robot_obj)
 
     def __enter__(self):
         return self
@@ -56,9 +67,23 @@ class _test_robot_container:
     def __exit__(self, exception_type, exception_value, traceback):
         self.robot_obj._close()
         self.node.Shutdown()
+        self.client_node.Shutdown()
+
+    def connect_client(self):
+        return self.node.ConnectService("rr+intra:///?nodename=robot&service=robot")
+
+def _test_serialize(obj, rr_type):    
+    node = _new_test_node(std_robdef=True)
+    try:
+        from RobotRaconteur.RobotRaconteurPythonUtil import PackMessageElement, UnpackMessageElement
+        mm = PackMessageElement(obj, rr_type, node=node)
+        mm.UpdateData()
+        return UnpackMessageElement(mm, node=node)
+    finally:
+        node.Shutdown()
 
 def test_init_abstract_robot():
-    node = _new_test_node()
+    node = _new_test_node(std_robdef=True)
     
     try:
         obj = _init_test_robot_obj(node)
@@ -74,6 +99,12 @@ def test_robot_container():
 
     assert not c.robot_obj._keep_going 
     # assert c.node.IsShutdown()
+
+def test_robot_container_client():
+    with _test_robot_container() as c:
+        client = c.connect_client()
+        print(client.device_info)
+        print(client.robot_info)
 
 def test_robot_init():
     with _test_robot_container() as c1:
@@ -314,3 +345,77 @@ def test_fill_states():
         assert sensor_data.robot_state.config_seqno == 1
 
         assert sensor_data.data_header.seqno == c._state_seqno
+
+def test_verify_communication():
+    with _test_robot_container() as c1:
+        c = c1.robot_obj
+
+        now = time.perf_counter()
+
+        assert not c._verify_communication(now)
+        assert c._communication_failure
+        assert c._command_mode == -1
+        assert c._operational_mode == 0
+        assert c._controller_state == 0
+        assert np.all(c._joint_position == np.zeros((0,)))
+        assert np.all(c._joint_velocity == np.zeros((0,)))
+        assert np.all(c._joint_effort == np.zeros((0,)))
+        assert c._endpoint_pose is None
+        assert c._endpoint_vel is None
+
+        last_val = now - 0.005
+        c._last_joint_state = last_val
+        c._last_robot_state = last_val
+        c._last_endpoint_state = last_val
+        assert c._verify_communication(now)
+        assert not c._communication_failure
+        assert c._operational_mode == 4
+
+def test_verify_robot_state():
+    with _test_robot_container() as c1:
+        c = c1.robot_obj
+
+        now = time.perf_counter()
+
+        c._command_mode = 5
+        c._enabled = True
+        c._communication_failure = False
+        assert c._verify_robot_state(now)
+        assert c._controller_state ==3
+
+        c._communication_failure = False
+        c._error = True
+        assert not c._verify_robot_state(now)
+        assert c._controller_state == 4
+        assert c._command_mode == -1
+        c._stopped = True
+        assert not c._verify_robot_state(now)
+        assert c._controller_state == 5
+        c._stopped = False
+        c._error = False
+        c._communication_failure = True
+        c._error = False
+        assert not c._verify_robot_state(now)
+        assert c._controller_state == 3
+        assert c._command_mode == -1
+        c._communication_failure = False
+        c._enabled = False
+        assert not c._verify_robot_state(now)
+        assert c._controller_state == 3
+        assert c._command_mode == -1
+        c._enabled = True
+        c._ready = True
+        assert c._verify_robot_state(now)
+        assert c._controller_state == 2
+        assert c._command_mode == 0
+
+#TODO: more tests on AbstractRobot
+
+def test_robot_info():
+    with _test_robot_container() as c1:
+        c = c1.robot_obj
+        robot_info = c.robot_info
+
+        _test_serialize(robot_info.device_info, "com.robotraconteur.device.DeviceInfo")
+        _test_serialize(robot_info, "com.robotraconteur.robotics.robot.RobotInfo")
+

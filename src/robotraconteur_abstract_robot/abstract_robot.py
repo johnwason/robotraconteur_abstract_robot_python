@@ -178,9 +178,9 @@ class AbstractRobot(ABC):
 
         self._broadcast_downsampler = RR.BroadcastDownsampler(context, 0)
         self._broadcast_downsampler.AddPipeBroadcaster(self.robot_state_sensor_data)
-        self._broadcast_downsampler.AddPipeBroadcaster(self.robot_state)
-        self._broadcast_downsampler.AddPipeBroadcaster(self.advanced_robot_state)
-        self._broadcast_downsampler.AddPipeBroadcaster(self.device_clock_nawe)
+        self._broadcast_downsampler.AddWireBroadcaster(self.robot_state)
+        self._broadcast_downsampler.AddWireBroadcaster(self.advanced_robot_state)
+        self._broadcast_downsampler.AddWireBroadcaster(self.device_clock_now)
 
         self._wires_ready = True
 
@@ -457,9 +457,9 @@ class AbstractRobot(ABC):
             self._operational_mode = self._robot_operational_mode["undefined"]
             self._controller_state = self._robot_controller_state["undefined"]
 
-            self._joint_position = np.zeros((1,))
-            self._joint_velocity = np.zeros((1,))
-            self._joint_effort = np.zeros((1,))
+            self._joint_position = np.zeros((0,))
+            self._joint_velocity = np.zeros((0,))
+            self._joint_effort = np.zeros((0,))
 
             self._endpoint_pose = None
             self._endpoint_vel = None
