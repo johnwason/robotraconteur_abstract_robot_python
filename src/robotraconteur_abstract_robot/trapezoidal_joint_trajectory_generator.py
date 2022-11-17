@@ -15,9 +15,9 @@ class JointTrajectoryPositionRequest(NamedTuple):
     desired_position: np.array
     desired_velocity: np.array
     max_velocity: np.array
-    desired_time: float
-    speed_ratio: float
-    splice_time: float
+    desired_time: float = None
+    speed_ratio: float = 1.
+    splice_time: float = None
 
 class JointTrajectoryVelocityRequest(NamedTuple):
     current_position: np.array
@@ -51,7 +51,10 @@ class TrapezoidalJointTrajectoryGenerator:
 
     @property
     def t_final(self):
-        return self._exec.t_final
+        if self._exec is not None:
+            return self._exec.t_final
+        else:
+            return 0.
 
     @property
     def is_valid(self):
@@ -121,7 +124,7 @@ class TrapezoidalJointTrajectoryGeneratorCalc:
         a3 = np.zeros((joint_count,))
 
         for i in range(joint_count):
-            if dx[i] == 0 and request.desired_velocity[i] == 0 and request.current_velocity == 0:
+            if dx[i] == 0 and request.desired_velocity[i] == 0 and request.current_velocity[i] == 0:
                 continue
 
             case2_success, v1[i], a1[i], a3[i], t1[i], t2[i], t3[i] = \

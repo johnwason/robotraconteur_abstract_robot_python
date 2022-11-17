@@ -242,7 +242,8 @@ class AbstractRobot(ABC):
         downsampler_step = None
 
         with self._lock:
-            downsampler_step = RR.BroadcastDownsamplerStep(self._broadcast_downsampler)
+            if self._wires_ready:
+                downsampler_step = RR.BroadcastDownsamplerStep(self._broadcast_downsampler)
 
             self._state_seqno += 1
 
@@ -256,8 +257,9 @@ class AbstractRobot(ABC):
         if res:
             self._send_robot_command(now, joint_pos_cmd, joint_vel_cmd)
 
-        with downsampler_step:
-            self._send_states(now, rr_robot_state, rr_advanced_robot_state, rr_state_sensor_data)
+        if downsampler_step:
+            with downsampler_step:
+                self._send_states(now, rr_robot_state, rr_advanced_robot_state, rr_state_sensor_data)
 
     def _fill_state_flags(self, now):
 
@@ -319,7 +321,7 @@ class AbstractRobot(ABC):
 
     def _calc_endpoint_poses(self):
 
-        if self._endpoint_pose == None:
+        if self._endpoint_pose is None:
             return np.zeros((0,), dtype=self._pose_dtype)
         n = len(self._endpoint_pose)
         o = np.zeros((n,), dtype=self._pose_dtype)
@@ -422,7 +424,7 @@ class AbstractRobot(ABC):
              
         self.robot_state.OutValue = rr_robot_state
         self.advanced_robot_state.OutValue = rr_advanced_robot_state
-        self.robot_state_sensor_data.AsyncSendPacket(rr_state_sensor_data, lambda _: None)
+        self.robot_state_sensor_data.AsyncSendPacket(rr_state_sensor_data, lambda: None)
         self.device_clock_now.OutValue = self._datetime_util.FillDeviceTime(self._robot_info.device_info, self._state_seqno)
 
     @abstractmethod
@@ -509,7 +511,7 @@ class AbstractRobot(ABC):
         self._trajectory_valid = False
         self._trajectory_current_time = 0.
         self._trajectory_max_time = 0.
-        self._trajectory_waypoint = 0.
+        self._trajectory_waypoint = 0
 
         if self._command_mode != self._robot_command_mode["trajectory"]:
             if self._active_trajectory is not None:
@@ -520,6 +522,14 @@ class AbstractRobot(ABC):
                 for t in self._queued_trajectories:
                     t._cancelled_in_queue()
                 self._queued_trajectories.clear()
+
+        if self._command_mode != self._robot_command_mode["jog"]:
+            if self._jog_trajectory_generator is not None:
+                self._jog_trajectory_generator = None
+            if self._jog_completion_handler is not None:
+                h = self._jog_completion_handler
+                self._jog_completion_handler = None
+                self._node.PostToThreadPool(lambda: h(None))
             
         if self._command_mode != self._robot_command_mode["velocity_command"]:
             # self._velocity_command = None
@@ -649,7 +659,7 @@ class AbstractRobot(ABC):
 
                      self._trajectory_valid = True
                      send_traj_cmd = True
-                elif interp_res == TrajectoryTaskRes.complete:
+                elif interp_res == TrajectoryTaskRes.trajectory_complete:
                     self._trajectory_valid = True
                     send_traj_comd = True
                     self._active_trajectory = None
@@ -681,7 +691,7 @@ class AbstractRobot(ABC):
             return True, None, None
 
     @abstractmethod
-    def _send_robot_command(self, joint_pos_cmd, joint_vel_cmd):
+    def _send_robot_command(self, now, joint_pos_cmd, joint_vel_cmd):
         pass
                         
     @property
@@ -690,7 +700,7 @@ class AbstractRobot(ABC):
             return self._command_mode
 
     @command_mode.setter
-    def command_value(self, value):
+    def command_mode(self, value):
         with self._lock:
             if self._command_mode == self._robot_command_mode["invalid_state"] \
                 and value == self._robot_command_mode["homing"]:
@@ -701,7 +711,7 @@ class AbstractRobot(ABC):
                 self._command_mode = self._robot_command_mode["homing"]
                 return
 
-            if not self.ready or self._communication_failure:
+            if not self._ready or self._communication_failure:
                 raise RR.InvalidOperationException("Cannot set robot command mode in current state")
 
             if self._command_mode != self._robot_command_mode["halt"] and value != self._robot_command_mode["halt"]:
@@ -792,8 +802,8 @@ class AbstractRobot(ABC):
                 self._jog_trajectory_generator = TrapezoidalJointTrajectoryGenerator(self._joint_count, limits)
 
                 new_req = JointTrajectoryPositionRequest(
-                    current_position = self._position_command or np.copy(self._joint_position),
-                    current_velocity = self._velocity_command or np.zeros((self._joint_count,)),
+                    current_position = (self._position_command if self._position_command is not None else np.copy(self._joint_position)),
+                    current_velocity = (self._velocity_command if self._velocity_command is not None else np.zeros((self._joint_count,))),
                     desired_position = joint_position,
                     desired_velocity = np.zeros((self._joint_count,)),
                     max_velocity = max_velocity,
@@ -842,7 +852,7 @@ class AbstractRobot(ABC):
             if timeout <= 0:
                 raise RR.InvalidArgumentException("Invalid jog timeout specified")
 
-            for i in range(len(self._joint_count)):
+            for i in range(self._joint_count):
                 if abs(joint_velocity[i] > self._robot_info.joint_info[i].joint_limits.reduced_velocity):
                     raise RR.InvalidArgumentException("Joint velocity exceeds joint limits")
 
@@ -878,8 +888,8 @@ class AbstractRobot(ABC):
                 self._jog_trajectory_generator = TrapezoidalJointTrajectoryGenerator(self._joint_count, limits)
 
                 new_req = JointTrajectoryVelocityRequest(
-                    current_position = self._position_command or np.copy(self._joint_position),
-                    current_velocity = self._velocity_command or np.zeros((self._joint_count,)),
+                    current_position = (self._position_command if self._position_command is not None else np.copy(self._joint_position)),
+                    current_velocity = (self._velocity_command if self._velocity_command is not None else np.zeros((self._joint_count,))),
                     desired_velocity = joint_velocity,
                     speed_ratio = self._speed_ratio,
                     timeout = timeout
@@ -925,9 +935,10 @@ class AbstractRobot(ABC):
             current_joint_pos = np.copy(self._joint_position)
 
         interp = JointTrajectoryInterpolator(self._robot_info)
-        joint_pos1, _ =interp.load_trajectory(trajectory, speed_ratio)
+        interp.load_trajectory(trajectory, speed_ratio)
 
-        interp.interpolate(0)
+        res, joint_pos1, _ = interp.interpolate(0)
+        assert res
 
         if np.any(np.abs(current_joint_pos - joint_pos1) > self._trajectory_error_tol):
             raise RR.InvalidArgumentException("Starting waypoint too far from current joint positions")
@@ -938,8 +949,9 @@ class AbstractRobot(ABC):
 
             traj_task = None
 
-            if self._activate_trajectory is None:
+            if self._active_trajectory is None:
                 traj_task = TrajectoryTask(self, interp, False, owner_ep)
+                self._active_trajectory = traj_task
             else:
                 traj_task = TrajectoryTask(self, interp, True, owner_ep)
                 self._queued_trajectories.append(traj_task)
@@ -962,7 +974,7 @@ class AbstractRobot(ABC):
                 
                 if t_index >= 0:
                     for i in range(len(self._queued_trajectories)-1, t_index, -1):
-                        self._queued_trajectory[i]._cancelled_in_queue()
+                        self._queued_trajectories[i]._cancelled_in_queue()
                         self._queued_trajectories.pop(i)
                     self._queued_trajectories.pop(t_index)
 
@@ -1171,6 +1183,8 @@ class TrajectoryTask:
         self._traj_t = 0.0
         self._traj_waypoint = 0
 
+        self._lock = threading.Lock()
+
     def _call_next_wait_handler(self, err):
         with self._lock:
             for c in self._next_wait_handler:
@@ -1258,7 +1272,7 @@ class TrajectoryTask:
             else:
                 self._next_wait_handler.append(complete)
 
-            timer = self._node.CreateTimer(5, lambda: complete(None), True)
+            timer = self._node.CreateTimer(5, lambda _: complete(None), True)
             timer.Start()
 
     def _cancelled_in_queue(self):
@@ -1286,14 +1300,17 @@ class TrajectoryTask:
 
             t = now - self._start_time
 
-        joint_pos1, current_waypoint1 = self._path.interpolate(t)
+        res, joint_pos1, current_waypoint1 = self._path.interpolate(t)
+        if not res:
+            self._call_next_wait_handler(Exception("Trajectory execution failed"))
+            return TrajectoryTaskRes.failed, None, None, 0.0, 0.0, 0
 
         if np.any(np.abs(current_joint_pos - joint_pos1) > self._parent._trajectory_error_tol):
             self._call_next_wait_handler(RR.OperationFailedException("Trajectory tolerance failure"))
             return TrajectoryTaskRes.ready, None, None, 0.0, 0.0, 0
 
         if not self._next_called:
-            return TrajectoryTaskRes.failed, None, None, 0.0, self._path.max_time, 0
+            return TrajectoryTaskRes.ready, None, None, 0.0, self._path.max_time, 0
         
         if t > self._path.max_time:
             self._traj_t = t

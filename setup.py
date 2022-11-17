@@ -19,7 +19,8 @@ setup(
         'PyYAML',
         'setuptools',
         'importlib_resources',
-        'general_robotics_toolbox'
+        'general_robotics_toolbox',
+        'scipy'
     ],
     tests_require=['pytest'],
     extras_require={

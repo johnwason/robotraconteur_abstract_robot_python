@@ -58,7 +58,7 @@ class JointTrajectoryInterpolator:
                 if w.time_from_start/speed_ratio <= last_t:
                     raise RR.InvalidArgumentException(f"Waypoint {i} time_from_start must be increasing")
 
-                if w.time_from_start - last_t > 0.1:
+                if w.time_from_start/speed_ratio - last_t > 0.1:
                     raise RR.InvalidArgumentException("Waypoint {i} more than 100 ms from previous waypoint")
 
             if np.any(w.joint_position > self._joint_max) or np.any(w.joint_position < self._joint_min):
