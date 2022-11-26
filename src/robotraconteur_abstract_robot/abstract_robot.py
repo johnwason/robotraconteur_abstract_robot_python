@@ -173,6 +173,9 @@ class AbstractRobot(ABC):
 
         self._config_seqno = 1
 
+        self._base_set_operational_mode = True
+        self._base_set_controller_state = True
+
     def RRServiceObjectInit(self, context, service_path):
         self.robot_state_sensor_data.MaxBacklog = 3
 
@@ -445,7 +448,7 @@ class AbstractRobot(ABC):
     def _send_reset_errors(self, handler):
         pass
 
-    def async_send_reset_errors(self, handler):
+    def async_reset_errors(self, handler):
         self._send_reset_errors(handler)
 
     def _verify_communication(self, now):
@@ -456,8 +459,9 @@ class AbstractRobot(ABC):
             self._communication_failure = True
 
             self._command_mode = self._robot_command_mode["invalid_state"]
-            self._operational_mode = self._robot_operational_mode["undefined"]
-            self._controller_state = self._robot_controller_state["undefined"]
+            if self._base_set_operational_mode:
+                self._operational_mode = self._robot_operational_mode["undefined"]
+                self._controller_state = self._robot_controller_state["undefined"]
 
             self._joint_position = np.zeros((0,))
             self._joint_velocity = np.zeros((0,))
@@ -468,7 +472,8 @@ class AbstractRobot(ABC):
 
             return False
 
-        self._operational_mode = self._robot_operational_mode["cobot"]
+        if self._base_set_operational_mode:
+            self._operational_mode = self._robot_operational_mode["cobot"]
         self._communication_failure = False
 
         return True
@@ -477,29 +482,34 @@ class AbstractRobot(ABC):
 
         if self._command_mode == self._robot_command_mode["homing"]:
             if self._enabled and not self._error and not self._communication_failure:
-                self._controller_state = self._robot_controller_state["motor_off"]
+                if self._base_set_controller_state:
+                    self._controller_state = self._robot_controller_state["motor_off"]
                 return True
 
-        if not self._ready or self._communication_failure:
-            if self._stopped:
-                self._controller_state = self._robot_controller_state["emergency_stop"]
-            elif self._error:
-                self._controller_state = self._robot_controller_state["guard_stop"]
-            else:
-                self._controller_state = self._robot_controller_state["motor_off"]
-            
-            self._command_mode = self._robot_command_mode["invalid_state"]
+        if not self._ready or self._error or self._communication_failure:
+            if self._base_set_controller_state:
+                if self._stopped:
+                    self._controller_state = self._robot_controller_state["emergency_stop"]
+                elif self._error:
+                    self._controller_state = self._robot_controller_state["guard_stop"]
+                else:
+                    self._controller_state = self._robot_controller_state["motor_off"]
+            if self._error or self._command_mode != self._robot_command_mode["halt"]:
+                self._command_mode = self._robot_command_mode["invalid_state"]
             return False
 
         if not self._enabled:
-            self._controller_state = self._robot_controller_state["motor_off"]
-            self._command_mode = self._robot_command_mode["invalid_state"]
+            if self._base_set_controller_state:
+                self._controller_state = self._robot_controller_state["motor_off"]
+            if self._command_mode != self._robot_command_mode["halt"]:
+                self._command_mode = self._robot_command_mode["invalid_state"]
             return False
 
-        if self._command_mode == self._robot_command_mode["invalid_state"]:
-            self._command_mode = self._robot_command_mode["halt"]
+        if self._command_mode == self._robot_command_mode["invalid_state"] and not self._error:
+             self._command_mode = self._robot_command_mode["halt"]
 
-        self._controller_state = self._robot_controller_state["motor_on"]
+        if self._base_set_controller_state:
+            self._controller_state = self._robot_controller_state["motor_on"]
 
         return True
 
@@ -709,6 +719,13 @@ class AbstractRobot(ABC):
                     raise RR.InvalidOperationException("Cannot set homing command mode in current state")
 
                 self._command_mode = self._robot_command_mode["homing"]
+                return
+
+            if self._command_mode == self._robot_command_mode["invalid_state"] \
+                and value == self._robot_command_mode["halt"] and self._enabled and not self._error \
+                and not self._communication_failure:
+
+                self._command_mode = value
                 return
 
             if not self._ready or self._communication_failure:
