@@ -733,7 +733,10 @@ class AbstractRobot(ABC):
                 self._command_mode = value
                 return
 
-            if not self._ready or self._communication_failure:
+            if self._communication_failure:
+                raise RR.InvalidOperationException("Cannot set robot command mode in current state")
+
+            if not self._ready and value != self._robot_command_mode["halt"]:
                 raise RR.InvalidOperationException("Cannot set robot command mode in current state")
 
             if self._command_mode != self._robot_command_mode["halt"] and value != self._robot_command_mode["halt"]:
