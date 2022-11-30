@@ -232,6 +232,11 @@ class AbstractRobot(ABC):
             
     def _close(self):
         self._keep_going = False
+        try:
+            self._loop_thread.join(timeout=1)
+        except:
+            pass
+
     
 
     def _run_timestep(self, now):
