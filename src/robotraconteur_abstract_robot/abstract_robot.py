@@ -80,6 +80,7 @@ class AbstractRobot(ABC):
 
         self._current_tool = [None]*len(self._robot_info.chains)
         self._current_payload = [None]*len(self._robot_info.chains)
+        self._current_payload_pose = [None]*len(self._robot_info.chains)
 
         for i in range(len(self._robot_info.chains)):
             if self._robot_info.chains[i].current_tool is not None:
@@ -947,9 +948,16 @@ class AbstractRobot(ABC):
     @property
     def robot_info(self):
         with self._lock:
+            
             for i in range(len(self._robot_info.chains)):
                 self._robot_info.chains[i].current_tool = self._current_tool[i]
                 self._robot_info.chains[i].current_payload = self._current_payload[i]
+                if self._robot_info.chains[i].extended is None:
+                    self._robot_info.chains[i].extended = dict()
+                self._robot_info.chains[i].extended["current_payload_pose"] = \
+                    RR.VarValue(self._current_payload_pose[i], "com.robotraconteur.geometry.Pose") \
+                    if self._current_payload_pose[i] is not None else None
+                
             return self._robot_info
 
     def execute_trajectory(self, trajectory):
@@ -1070,7 +1078,7 @@ class AbstractRobot(ABC):
             if self._current_tool[chain] is None:
                 raise RR.InvalidArgumentException(f"Tool not attached to kinematic chain {chain}")
 
-            if self._current_payload[chain] is None:
+            if self._current_payload[chain] is not None:
                 raise RR.InvalidArgumentException(f"Cannot remove tool while payload attached")
 
             if len(tool_name) > 0:                
@@ -1088,7 +1096,7 @@ class AbstractRobot(ABC):
             self.tool_changed.fire(chain, "")
             self._config_seqno+=1
 
-    def payload_attached(self, chain, payload):
+    def payload_attached(self, chain, payload, pose):
         if payload is None:
             raise RR.NullValueException("Payload cannot be null")
 
@@ -1103,6 +1111,7 @@ class AbstractRobot(ABC):
                 raise RR.InvalidArgumentException(f"Payload already attached to kinematic chain {chain}")
 
             self._current_payload[chain] = payload
+            self._current_payload_pose[chain] = pose
 
             try:
                 device_name = payload.device_info.device.name
