@@ -25,6 +25,7 @@ class JointTrajectoryVelocityRequest(NamedTuple):
     desired_velocity: np.array
     timeout: float
     speed_ratio: float
+    desired_time: float = None
 
 class JointTrajectoryPositionCommand(NamedTuple):
     command_position: np.array

@@ -858,6 +858,7 @@ class AbstractRobot(ABC):
 
             if not wait:
                 self._jog_completion_source = None
+                self._node.PostToThreadPool(lambda: handler(None))
             else:
                 self._jog_completion_handler = handler
 
@@ -937,11 +938,12 @@ class AbstractRobot(ABC):
                     speed_ratio = self._speed_ratio
                 )
 
-                self._jog_trajectory_generator.update_desired_position(new_req)
+                self._jog_trajectory_generator.update_desired_velocity(new_req)
                 self._jog_start_time = now
 
             if not wait:
                 self._jog_completion_source = None
+                self._node.PostToThreadPool(lambda: handler(None))
             else:
                 self._jog_completion_handler = handler
 
