@@ -160,7 +160,7 @@ class AbstractRobot(ABC):
                                         Set to False if driver will update ``_operational_mode``
     :ivar _base_set_controller_state: If True, abstract robot will set ``_controller_state`` to a default value.
                                         Set to False if driver will update ``_controller_state``
-    ``ivar _lock: Lock to hold when updating data to prevent race conditions
+    :ivar _lock: Lock to hold when updating data to prevent race conditions
 
     :param robot_info: The ``RobotInfo`` structure for the robot
     :param default_joint_count: The default number of joints for the robot
@@ -1005,18 +1005,10 @@ class AbstractRobot(ABC):
     @property
     def command_mode(self):
         """
-        Returns the current ``command_mode``
-        """
-        with self._lock:
-            return self._command_mode
-
-    @command_mode.setter
-    def command_mode(self, value):
-        """
-        Sets the current command mode. Command mode must always be set to ``halt`` (0) before changing to another mode.
-        If there is an error, the mode will change to ``error`` (-1), and must be set to ``halt`` to clear the error.
-        If it cannot be cleared, it may be possible to call the robot a "reset_errors()" function, if the driver
-        has the ``software_reset_errors`` capability.
+        Get or set the current command mode. Command mode must always be set to ``halt`` (0) before changing to another 
+        mode. If there is an error, the mode will change to ``error`` (-1), and must be set to ``halt`` to clear the 
+        error. If the error cannot be cleared, it may be possible to call the robot a "reset_errors()" function, if the 
+        driver has the ``software_reset_errors`` capability.
 
         ``jog`` mode (1) requires the robot be in manual operational mode, if the robot supports reading the
         operational mode and is not a cobot. The ``jog_command`` capability is required.
@@ -1033,6 +1025,11 @@ class AbstractRobot(ABC):
         ``homing_command`` mode (5) requires the ``homing_command`` capability. The implementation is device specific
 
         """
+        with self._lock:
+            return self._command_mode
+
+    @command_mode.setter
+    def command_mode(self, value):
         with self._lock:
             if self._command_mode == self._robot_command_mode["invalid_state"] \
                 and value == self._robot_command_mode["homing"]:
@@ -1401,17 +1398,14 @@ class AbstractRobot(ABC):
     @property
     def speed_ratio(self):
         """
-        Get the speed ratio
+        Get or set the speed ratio. Can be used to reduce or increase speed of trajectory and other operations.
+        :param value: New speed ratio. Must be between 0.1 and 10
+        :type value: float
         """
         return self._speed_ratio
 
     @speed_ratio.setter
     def speed_ratio(self, value):
-        """
-        Set the speed ratio. Can be used to reduce or increase speed of trajectory and other operations.
-        :param value: New speed ratio. Must be between 0.1 and 10
-        :type value: float
-        """
         if value < 0.1 or value > 10:
             raise RR.InvalidArgumentException("Invalid speed_ratio")
 
@@ -1633,14 +1627,8 @@ class AbstractRobot(ABC):
 
     @property
     def isoch_downsample(self):
-        """Return the current client isoch_downsample level"""
-        with self._lock:
-            return self._broadcast_downsampler.GetClientDownsample(RR.ServerEndpoint.GetCurrentEndpoint())
-
-    @isoch_downsample.setter
-    def isoch_downsample(self, value):
         """
-        Set the current client isoch_downsample level. By default, the wires and pipes will transmit
+        Get or set the current client isoch_downsample level. By default, the wires and pipes will transmit
         every timestep. The ``isoch_downsample`` property allows the client to request every ``n`` samples be dropped.
         For instance, if ``isoch_downsample`` is set to 2, the driver will skip two timesteps, and only transmit on every
         third timestep. Check ``isoch_info` to determine the native loop update rate in Hz.
@@ -1649,6 +1637,11 @@ class AbstractRobot(ABC):
         :type value: int
         
         """
+        with self._lock:
+            return self._broadcast_downsampler.GetClientDownsample(RR.ServerEndpoint.GetCurrentEndpoint())
+
+    @isoch_downsample.setter
+    def isoch_downsample(self, value):
         with self._lock:
             self._broadcast_downsampler.SetClientDownsample(RR.ServerEndpoint.GetCurrentEndpoint(), value)
 

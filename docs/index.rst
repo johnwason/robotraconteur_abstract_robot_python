@@ -212,7 +212,7 @@
       * **_base_set_controller_state** – If True, abstract robot will set ``_controller_state`` to a default value.
         Set to False if driver will update ``_controller_state``
 
-   >>``<<ivar _lock: Lock to hold when updating data to prevent race conditions
+      * **_lock** – Lock to hold when updating data to prevent race conditions
 
    :Parameters:      
       * **robot_info** – The ``RobotInfo`` structure for the robot
@@ -514,7 +514,24 @@
 
    ``property command_mode``
 
-      Returns the current ``command_mode``
+      Get or set the current command mode. Command mode must always be set to ``halt`` (0) before changing to another 
+      mode. If there is an error, the mode will change to ``error`` (-1), and must be set to ``halt`` to clear the 
+      error. If the error cannot be cleared, it may be possible to call the robot a “reset_errors()” function, if the 
+      driver has the ``software_reset_errors`` capability.
+
+      ``jog`` mode (1) requires the robot be in manual operational mode, if the robot supports reading the
+      operational mode and is not a cobot. The ``jog_command`` capability is required.
+
+      ``trajectory`` mode (2) can run in auto or manual operational mode and requires the ``trajectory_command`` 
+      capability.
+
+      ``position_command`` mode (3) can run in auto or manual operational mode and requires the 
+      ``position_command`` capability.
+
+      ``velocity_command`` mode (4) can run in auto or manual operational mode and requires the 
+      ``velocity_command`` capability.
+
+      ``homing_command`` mode (5) requires the ``homing_command`` capability. The implementation is device specific
 
    **controller_state()**
 
@@ -552,7 +569,13 @@
 
    ``property isoch_downsample``
 
-      Return the current client isoch_downsample level
+      Get or set the current client isoch_downsample level. By default, the wires and pipes will transmit
+      every timestep. The ``isoch_downsample`` property allows the client to request every ``n`` samples be dropped.
+      For instance, if ``isoch_downsample`` is set to 2, the driver will skip two timesteps, and only transmit on every
+      third timestep. Check >>``<<isoch_info` to determine the native loop update rate in Hz.
+
+      :Parameters:      
+         **value** (*int*) – The downsample level
 
    ``property isoch_info``
 
@@ -622,7 +645,9 @@
 
    ``property speed_ratio``
 
-      Get the speed ratio
+      Get or set the speed ratio. Can be used to reduce or increase speed of trajectory and other operations.
+      :param value: New speed ratio. Must be between 0.1 and 10
+      :type value: float
 
    **tool_attached(chain, tool)**
 
