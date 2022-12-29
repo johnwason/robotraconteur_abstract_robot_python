@@ -1,3 +1,8 @@
+"""
+Module containing ``AbstractRobot`` class. Robot Raconteur types are shortened for brevity. See 
+``com.robotraconteur.robotics.robot`` robdef ``using`` statements for fully qualified types.
+"""
+
 from enum import Enum
 import traceback
 from turtle import down
@@ -17,6 +22,150 @@ from .trapezoidal_joint_trajectory_generator import JointTrajectoryLimits, Joint
     JointTrajectoryVelocityRequest, JointTrajectoryPositionCommand, TrapezoidalJointTrajectoryGenerator
 
 class AbstractRobot(ABC):
+    """
+    Abstact base class for standard Robot Raconteur robot device drivers. Subclasses implement specific functionality
+    for each robot controller type. Typically, these drivers communicate with the vendor controller. The vender
+    controller may provide the communication method natively, or the vendor controller may need to execute
+    special programs provided by the driver.
+
+    The driver uses a ``RobotInfo`` structure to initialize information about kinematics etc. The __init__
+    function should also be overridden to initialize various instance variables. The ``robot_info`` parameter
+    is typically loaded from a YAML file.
+
+    AbstractRobot uses a real-time loop that periodically calls ``_run_timestep()``, with the period set by 
+    ``_update_period``. ``_run_timestep()`` does the following, some of which the subclass must implement:
+
+    #. Read feedback from driver (must be implemented by subclass).
+         Update ``_joint_position``, ``_joint_velocity`` (optional), ``_joint_effort`` (optional), ``_endpoint_pose``, 
+        ``_endpoint_vel`` (optional), ``_ready``, ``_enabled``, ``_stopped``, ``_error``, ``_estop_source``,
+        ``_last_robot_state``, ``_last_joint_state``, and ``_last_endpoint_state``. These updates may happen
+        outside the loop, when the data is received from the robot. Hold ``_lock`` when updating data if not
+        inside the loop.
+    #. Verify communication by calling ``_verify_communication()``. If ``_last_robot_state``, ``_last_joint_state``,
+        or ``_last_endpoint_state`` exceed ``_communication_timeout`` relative to stopwatch time, set communication
+        failure.
+    #. Verify the current robot state by calling ``_verify_robot_state()
+    #. Fill a joint position or joint velocity command by calling ``_fill_robot_command()``. This will check the
+        current operational mode and commands from the client to generate the next command.
+    #. Fill the robot state structures to return to clients. Calls ``_fill_states()``, ``_fill_state_flags()``,
+        ``_calc_endpoint_poses()``, and ``_calc_endpoint_vels()``
+    #. If a valid command is available, send to the robot using ``_send_robot_command()``. Subclass must implement
+        this function.
+    
+    At a minimum, a driver subclass must fill feedback data from the robot as shown in step 1 above, and must
+    implement ``_send_robot_command()``, ``_send_disable()``, ``_send_enable()``, and ``_send_reset_errors()``.
+    See the example minimal ABB robot driver. Also see abb_robotraconteur_driver_hmp for a more sophisticated driver.    
+
+    :ivar _robot_info: The ``RobotInfo`` structure, initialized from __init__ parameter
+    :ivar _joint_names: The names of the robot joints. Initialized from ``robot_info`` or ``default_joint_count``
+    :ivar _joint_count: The number of robot joints. Initialized from ``robot_info`` or ``default_joint_count``
+    :ivar _robot_uuid: The UUID of the robot. Initialized from the ``robot_info`` structure
+    :ivar _robot_caps: The capability flags of the robot taken from ``RobotCapabilities`` enum. By default initialized
+                       from ``robot_info`, but it is recommended the driver override this value in __init__
+    :ivar _robot_util: Companion ``RobotUtil`` utility class instance
+    :ivar _datetime_util: Companion ``DateTimeUtil`` utility class instance
+    :ivar _geometry_util: Companion ``GeometryUtil`` utility class instance
+    :ivar _sensor_data_util: Companion ``SensorDataUtil`` utility class instance
+    :ivar _pose_dtype: ``com.robotraconteur.geometry.Pose`` numpy dtype
+    :ivar _spatial_velocity_dtype: ``com.robotraconteur.geometry.SpatialVelocity`` numpy dtype
+    :ivar _robot_state_type: ``RobotState`` structure type
+    :ivar _advanced_robot_state_type: ``AdvancedRobotState`` structure type
+    :ivar _robot_state_sensor_data_type: ``RobotStateSensorData`` structure type
+    :ivar _robot_joint_command_type: ``RobotJointCommand`` structure type
+    :ivar _isoch_info_type: ``IsochInfo`` structure type
+    :ivar _robot_consts: Constants from ``com.robotraconteur.robotics.robot``
+    :ivar _robot_capabilities: ``RobotCapabilities`` enum
+    :ivar _robot_command_mode: ``RobotCommandMode`` enum
+    :ivar _robot_operational_mode: ``RobotOperationalMode`` enum
+    :ivar _robot_controller_state: ``RobotControllerState`` enum
+    :ivar _robot_state_flags: ``RobotStateFlags`` enum
+    :ivar _joint_consts: Constants from ``com.robotraconteur.robotics.joints``
+    :ivar _joint_position_units: ``JointPositionUnits`` enum
+    :ivar _joint_effort_units: ``JointEffortUnits`` enum
+    :ivar _uses_homing: Robot uses homing command. Initialized from capabilities flags in ``robot_info``. 
+            Recommended to override in __init__
+    :ivar _has_position_command: Robot has streaming position command. Initialized from capabilities flags in 
+            ``robot_info``. Recommended to override in __init__
+    :ivar _has_velocity_command: Robot has streaming velocity command. Initialized from capabilities flags in 
+            ``robot_info``. Recommended to override in __init__
+    :ivar _has_jog_command: Robot has jog command. Initialized from capabilities flags in 
+            ``robot_info``. Recommended to override in __init__
+    :ivar _current_tool: Currently attached robot tool. Array, one entry per chain. Initialized from ``robot_info``,
+                            updated using ``tool_attached()`` and ``tool_detached()``
+    :ivar _current_payload: Currently attached payload. Array, one entry per chain. Initialized from ``robot_info``,
+                            updated using ``payload_attached()`` and ``payload_detached()``
+    :ivar _current_payload_pose: Pose of currently attached payload relative to tool TCP. Array, one entry per chain. 
+                                    Initialized from ``robot_info``, updated using ``payload_attached()`` 
+                                    and ``payload_detached()``
+    :ivar _keep_going: Boolean flag to stop loop
+    :ivar _update_period: The update period of the loop (aka timestep). Should be set in __init__
+    :ivar _speed_ratio: The current speed ratio. Set using ``speed_ratio`` property
+    :ivar _jog_joint_limit: The maximum joint distance allowed during a jog command
+    :ivar _trajectory_error_tol: The maximum error allowed between command and robot position during trajectory 
+                                    execution
+    :ivar _command_mode: The current command mode. Set using ``command_mode`` property, and updated during operation
+                            due to errors or other events.
+    :ivar _operational_mode: The operational mode of the vendor robot controller, using values from 
+                                ``RobotOperationalMode`` enum. Should be
+                                updated every timestep if available. Set ``_base_set_operational_mode`` to False
+                                if used.
+    :ivar _controller_state: The controller state of the vendor robot controller, using values from 
+                                ``RobotOperationalMode`` enum. Should be
+                                updated every timestep if available. Set ``_base_set_controller_state`` to False
+                                if used.
+    :ivar _joint_position: Current joint position based on feedback in radians (or meters). This value should be
+                            updated every timestep using robot feedback.
+    :ivar _joint_velocity: Current joint velocity based on feedback in radians/s (or meters/s). This value should be
+                            updated every timestep using robot feedback. Leave as empty array if velocity feedback
+                            not available.
+    :ivar _joint_effort: Current joint effort based on feedback in Nm (or N). This value should be
+                            updated every timestep using robot feedback. Leave as empty array if effort feedback
+                            not available.
+    :ivar _position_command: Current position command. Set by the subclass after issuing command to robot. This
+                                value is used for client state information.
+    :ivar _velocity_command: Current velocity command. Set by the subclass after issuing command to robot. This
+                                value is used for client state information.
+    :ivar _endpoint_pose: Array of endpoint poses, one entry per chain. Update every timestep. Units should be in 
+                            meters, quaternions, relative to world or base of robot.
+    :ivar _endpoint_vel: Array of endpoint velocities, one entry per chain. Update every timestep. Units should be in 
+                            meters/s, radians/s, relative to world or base of robot.
+    :ivar _last_robot_state: The stopwatch time in seconds of the last state update received from the robot. 
+                                Must be updated to avoid communication timeout.
+    :ivar _last_joint_state: The stopwatch time in seconds of the last joint position update received from the robot. 
+                                Must be updated to avoid communication timeout.
+    :ivar _last_endpoint_state: The stopwatch time in seconds of the last endpoint update received from the robot. 
+                                Must be updated to avoid communication timeout.
+    :ivar _state_seqno: Counter of number of loop iterations executed (sequence number)
+    :ivar _homed: Set to True if robot is homed. Only valid if robot has homing capability
+    :ivar _ready: Set to True if robot is ready to move. Should be updated every timestep
+    :ivar _enabled: Set to True if robot is enabled with motors on. Should be updated every timestep. Robot may
+                    be enabled but not ready
+    :ivar _stopped: Set to True if robot is stopped due to an estop. Should be updated every timestep
+    :ivar _error: Set to True if robot is in an error state. Should be updated every timestep. Errors are reset by
+                    switching to halt more, calling ``reset_errors()``, and/or clearing the error on the vendor
+                    controller, in escalating levels of severity.
+    :ivar _estop_source: The source of the estop, using values from ``RobotStateFlags``
+    :ivar _communication_failure: Set by ``_verify_communication`` based on ``_communication_timeout``
+    :ivar _communication_timeout: Communication timeout in seconds. If no updates are received from the controller
+                                  within the communication timeout, an error condition is set
+    :ivar _broadcast_downsampler: Broadcast downsampler used by all wires and pipes to control data rate sent to client
+    :ivar position_command: Wire populated by Robot Raconteur to receive streaming position commands. Only used 
+                            in ``position_command`` command mode
+    :ivar velocity_command: Wire populated by Robot Raconteur to receive streaming position commands. Only used 
+                            in ``velocity_command`` command mode
+    :ivar _wires_ready: Set to True when wires and pipes have been initialized by Robot Raconteur
+    :ivar _config_seqno: The sequence number returned as part of ``RobotInfo``. Incremented as tools and payloads
+                            are attached/detached.
+    :ivar _base_set_operational_mode: If True, abstract robot will set ``_operational_mode`` to a default value.
+                                        Set to False if driver will update ``_operational_mode``
+    :ivar _base_set_controller_state: If True, abstract robot will set ``_controller_state`` to a default value.
+                                        Set to False if driver will update ``_controller_state``
+    ``ivar _lock: Lock to hold when updating data to prevent race conditions
+
+    :param robot_info: The ``RobotInfo`` structure for the robot
+    :param default_joint_count: The default number of joints for the robot
+    :param node: The Robot Raconteur node for the driver
+    """
     def __init__(self, robot_info, default_joint_count, node = None ):
         super().__init__()
 
@@ -169,9 +318,6 @@ class AbstractRobot(ABC):
         self._jog_trajectory_generator = None
         self._jog_completion_handler = None
 
-        self._joint_position_command = None
-        self._joint_velocity_command = None
-
         self._config_seqno = 1
 
         self._base_set_operational_mode = True
@@ -188,13 +334,26 @@ class AbstractRobot(ABC):
 
         self._wires_ready = True
 
-    def _perf_counter(self):
+    def _perf_counter(self) -> float:
+        """
+        System performance counter in seconds. This counter is not relative to real time clock.
+
+        :return: Performance counter time in seconds
+        """
         return time.perf_counter()
 
-    def _stopwatch_ellapsed_s(self):
+    def _stopwatch_ellapsed_s(self) -> float:
+        """
+        Stopwatch time in seconds. Relative to start of driver loop.
+
+        :return: Stopwatch time in seconds
+        """
         return self._perf_counter() - self._stopwatch_start
 
     def _start_robot(self):
+        """
+        Start the robot driver loop
+        """
 
         self._stopwatch_epoch = self._datetime_util.TimeSpec2Now()
         self._stopwatch_start = self._perf_counter()
@@ -205,10 +364,17 @@ class AbstractRobot(ABC):
         self._loop_thread.start()
 
     def _stop_robot(self):
+        """
+        Stop the robot driver loop
+        """
         self._keep_going = False
         self._loop_thread.join()
 
     def _loop_thread_func(self):
+        """
+        Loop thread entry function. This function runs the loop, and calls ``run_timestep()`` periodically at
+        ``_update_period`` specified in seconds.
+        """
 
         next_wait = self._stopwatch_ellapsed_s()
         now = next_wait
@@ -232,6 +398,9 @@ class AbstractRobot(ABC):
 
             
     def _close(self):
+        """
+        Close the driver, stop the loop
+        """
         self._keep_going = False
         try:
             self._loop_thread.join(timeout=1)
@@ -241,6 +410,11 @@ class AbstractRobot(ABC):
     
 
     def _run_timestep(self, now):
+        """
+        Called by loop each timestep at ``_update_timestep`` period in seconds
+
+        :param now: stopwatch time in seconds
+        """
         res = False
         joint_pos_cmd = None
         joint_vel_cmd = None
@@ -271,6 +445,12 @@ class AbstractRobot(ABC):
                 self._send_states(now, rr_robot_state, rr_advanced_robot_state, rr_state_sensor_data)
 
     def _fill_state_flags(self, now):
+        """
+        Fill ``_robot_state_flags`` based on current state of driver. Called by the loop each timestep to update 
+        driver state
+
+        :param now: stopwatch time in seconds
+        """
 
         f = 0
         if self._communication_failure:
@@ -318,6 +498,17 @@ class AbstractRobot(ABC):
         return f
 
     def _calc_endpoint_pose(self, chain):
+        """
+        Compute endpoint pose for specified chain. By default uses ``_endpoint_pose[chain]`` and transforms
+        to the TCP of ``self._current_tool[chain]``. If the robot reports the endpoint position with the tool
+        transform applied, this should return ``self._endpoint_pose[chain]``
+
+        Called by the loop each timestep to update driver state.
+
+        :param chain: The chain index, always 0 for single arm driver
+        :rtype: com.robotraconteur.geometry.Pose
+        :return: The pose of the end effector
+        """
 
         # CALL LOCKED!
         if self._current_tool[chain] is None:
@@ -329,7 +520,14 @@ class AbstractRobot(ABC):
         return self._geometry_util.rox_transform_to_pose(res)
 
     def _calc_endpoint_poses(self):
+        """
+        Compute the endpoints of all chains. Calls ``_calc_endpoint_pose()`` for each chain.
 
+        Called by the loop each timestep to update driver state.
+
+        :rtype: com.robotraconteur.geometry.Pose[]
+        :return: Array of all chain poses. Single element array for single arm drivers
+        """
         if self._endpoint_pose is None:
             return np.zeros((0,), dtype=self._pose_dtype)
         n = len(self._endpoint_pose)
@@ -339,7 +537,17 @@ class AbstractRobot(ABC):
         return o
 
     def _calc_endpoint_vel(self, chain):
+        """
+        Compute spatial velocity for specified chain. By default uses ``_endpoint_vel[chain]`` and applies TCP
+        transform of ``self._current_tool[chain]``. If the robot reports the endpoint position with the tool
+        transform applied, this should return ``self._endpoint_vel[chain]``
 
+        Called by the loop each timestep to update driver state.
+
+        :param chain: The chain index, always 0 for single arm driver
+        :rtype: com.robotraconteur.geometry.SpatialVelocity
+        :return: The spatial velocity (6x1) of the end effector
+        """
         # CALL LOCKED!
 
         if self._current_tool[chain] is None:
@@ -358,6 +566,14 @@ class AbstractRobot(ABC):
         return self._geometry_util.array_to_spatial_acceleration(np.concatenate((endpoint_vel_ang, vel)))
 
     def _calc_endpoint_vels(self):
+        """
+        Compute the spatial velocity of all chains. Calls ``_calc_endpoint_vel()`` for each chain.
+
+        Called by the loop each timestep to update driver state.
+
+        :rtype: com.robotraconteur.geometry.SpatialVelocity[]
+        :return: Array of all chain spatial velocities. Single element array for single arm drivers
+        """
 
         if self._endpoint_vel is None:
             return np.zeros((0,),dtype=self._spatial_velocity_dtype)
@@ -370,6 +586,15 @@ class AbstractRobot(ABC):
         return o
 
     def _fill_states(self, now):
+        """
+        Fill the ``RobotState``, ``AdvancedRobotState``, and ``RobotStateSensorData`` structures based on
+        current driver state.
+
+        Called by the loop each timestep to fill data to send to clients.
+
+        :param now: stopwatch time in seconds
+        :rtype: Tuple[RobotState,AdvancedRobotState,RobotStateSensorData]
+        """
         ts = self._datetime_util.TimeSpec3Now()
 
         rob_state = self._robot_state_type()               
@@ -386,9 +611,9 @@ class AbstractRobot(ABC):
         rob_state.joint_position = np.copy(self._joint_position)
         rob_state.joint_velocity = np.copy(self._joint_velocity)
         rob_state.joint_effort = np.copy(self._joint_effort)
-        rob_state.joint_position_command = self._joint_position_command if self._joint_position_command is not None \
+        rob_state.joint_position_command = self._position_command if self._position_command is not None \
                 else np.zeros((0,))
-        rob_state.joint_velocity_command = self._joint_velocity_command if self._joint_velocity_command is not None \
+        rob_state.joint_velocity_command = self._velocity_command if self._velocity_command is not None \
                 else np.zeros((0,))
         rob_state.kin_chain_tcp = self._calc_endpoint_poses()
         rob_state.kin_chain_tcp_vel = self._calc_endpoint_vels()
@@ -427,7 +652,16 @@ class AbstractRobot(ABC):
 
 
     def _send_states(self, now, rr_robot_state, rr_advanced_robot_state, rr_state_sensor_data):
-        
+        """
+        Sends the states to the Robot Raconteur clients using broadcast wires
+
+        Called by the loop each timestep to send data to clients.
+
+        :param now: stopwatch time in seconds
+        :param rr_robot_state: populated RobotState instance
+        :param rr_advanced_robot_state: populated AdvancedRobotState instance
+        :param rr_state_sensor_data: populated RobotStateSensorData instance
+        """
         if not self._wires_ready:
             return
              
@@ -438,26 +672,50 @@ class AbstractRobot(ABC):
 
     @abstractmethod
     def _send_disable(self, handler):
+        """
+        Called to send a disable command to the robot. Only valid if driver has ``software_enable`` capability.
+        Implementing class must override if used. ``handler`` must be called to complete the asynchronous request.
+        """
         pass
 
     def async_disable(self, handler):
+        """Called by client to request robot disable. Calls ``_send_disable()``"""
         self._send_disable(handler)
 
     @abstractmethod
     def _send_enable(self, handler):
+        """
+        Called to send an enable command to the robot. Only valid if driver has ``software_enable`` capability.
+        Implementing class must override if used. ``handler`` must be called to complete the asynchronous request.
+        """
         pass
 
     def async_enable(self, handler):
+        """Called by client to request robot enable. Calls ``_send_enable()``"""
         self._send_enable(handler)
 
     @abstractmethod
     def _send_reset_errors(self, handler):
+        """
+        Called to send an reset errors command to the robot. Only valid if driver has ``software_reset_errors`` 
+        capability. Implementing class must override if used. ``handler`` must be called to complete the asynchronous 
+        request.
+        """
         pass
 
     def async_reset_errors(self, handler):
+        """Called by client to request software reset errors. Calls ``_send_reset_errors()``"""
         self._send_reset_errors(handler)
 
     def _verify_communication(self, now):
+        """
+        Verify that the driver is communicating with robot. Compares last communication tomi te 
+        ``_communication_timeout`` to determine when communication has been lost.
+
+        Called by the loop each timestep to check if robot is still communicating.
+
+        :param now: stopwatch time in seconds
+        """
         if (now - self._last_joint_state) > self._communication_timeout \
             or (now - self._last_robot_state) > self._communication_timeout \
             or (now - self._last_endpoint_state) > self._communication_timeout :
@@ -485,6 +743,12 @@ class AbstractRobot(ABC):
         return True
 
     def _verify_robot_state(self, now):
+        """
+        Verify that the robot is ready to operate, or if an error has occurred. Drops to ``halt`` command mode
+        if robot is not ready. Drops to ``error`` command mode if error has occurred.
+
+        :param now: stopwatch time in seconds
+        """
 
         if self._command_mode == self._robot_command_mode["homing"]:
             if self._enabled and not self._error and not self._communication_failure:
@@ -520,6 +784,22 @@ class AbstractRobot(ABC):
         return True
 
     def _fill_robot_command(self, now):
+        """
+        Fill robot command to send to robot based on current state and commands sent by the client. Returns a
+        tuple containing three elements: ``success``, ``joint_position_command``, ``joint_velocity_command``.
+        If success is False, the driver cannot generate a command in its current state. If ``success`` is True,
+        either ``joint_position_command`` will be non-Null, or ``joint_velocity_command`` will be non-Null.
+        ``joint_velocity_command`` is only valid if the driver has the ``velocity_command`` driver capability.
+        ``joint_position_command`` is in radians (or meters), while ``joint_velocity_command`` is in radians/s 
+        (or meters/s)
+
+        This function is called by the loop every timestep, and the return is passed to ``_send_joint_command()``.
+        It is not typically called by the implementing class.
+
+        :param now: stopwatch time in seconds
+        :rtype: Tuple[bool,np.array,np.array]
+        :return: ``success``, ``joint_position_command``, ``joint_velocity_command``
+        """
 
         self._wire_position_command_sent = False
         self._wire_velocity_command_sent = False
@@ -708,15 +988,51 @@ class AbstractRobot(ABC):
 
     @abstractmethod
     def _send_robot_command(self, now, joint_pos_cmd, joint_vel_cmd):
+        """
+        Called each timestep to send robot command. Must be implemented by subclass.
+
+        Both ``joint_pos_cmd`` and ``joint_vel_cmd`` may be None if there is no valid command available.
+        If ``joint_pos_cmd`` is non-Null, a joint position command must be sent. All drivers must support
+        position command. ``joint_vel_cmd`` is only used for ``velocity_command`` mode, and is only supported
+        if the driver has ``velocity_command`` capability.
+
+        :param now: stopwatch time in seconds
+        :param joint_pos_cmd: Joint position command in radians (or meters)
+        :param joint_vel_cmd: Joint velocity command in radians/s (or meters/s)
+        """
         pass
                         
     @property
     def command_mode(self):
+        """
+        Returns the current ``command_mode``
+        """
         with self._lock:
             return self._command_mode
 
     @command_mode.setter
     def command_mode(self, value):
+        """
+        Sets the current command mode. Command mode must always be set to ``halt`` (0) before changing to another mode.
+        If there is an error, the mode will change to ``error`` (-1), and must be set to ``halt`` to clear the error.
+        If it cannot be cleared, it may be possible to call the robot a "reset_errors()" function, if the driver
+        has the ``software_reset_errors`` capability.
+
+        ``jog`` mode (1) requires the robot be in manual operational mode, if the robot supports reading the
+        operational mode and is not a cobot. The ``jog_command`` capability is required.
+
+        ``trajectory`` mode (2) can run in auto or manual operational mode and requires the ``trajectory_command`` 
+        capability.
+
+        ``position_command`` mode (3) can run in auto or manual operational mode and requires the 
+        ``position_command`` capability.
+
+        ``velocity_command`` mode (4) can run in auto or manual operational mode and requires the 
+        ``velocity_command`` capability.
+
+        ``homing_command`` mode (5) requires the ``homing_command`` capability. The implementation is device specific
+
+        """
         with self._lock:
             if self._command_mode == self._robot_command_mode["invalid_state"] \
                 and value == self._robot_command_mode["homing"]:
@@ -768,7 +1084,26 @@ class AbstractRobot(ABC):
                 raise RR.InvalidOperationException("Invalid command mode specified")
     
     def async_jog_freespace(self, joint_position, max_velocity, wait, handler):
+        """
+        Called by client to jog the robot to a specified joint position with specified maximum joint velocity. If wait
+        is True, the function will not return to the client until the move is complete. Otherwise will return
+        immediately.
 
+        This function is typically used to jog the robot to a specific position.
+
+        Robot must be in ``jog`` command mode to call this function.
+
+        This is an asynchronous function, and handler must be called to return result to the client.
+
+        :param joint_position: The desired joint position in radians
+        :type joint_position: np.ndarray
+        :param max_velocity: The maximum joint velocity in radians/s
+        :type max_velocity: np.ndarray
+        :param wait: Wait for completion or return immediately
+        :type wait: bool
+        :param handler: Handler to call when function is complete
+        :type handler: Callable[[],Exception]
+        """
         with self._lock:
 
             if self._command_mode != self._robot_command_mode["jog"]:
@@ -864,7 +1199,27 @@ class AbstractRobot(ABC):
 
     
     def async_jog_joint(self, joint_velocity, timeout, wait, handler):
+        """
+        Called by client to jog the robot at a specified joint velocity for a specified time. If wait
+        is True, the function will not return to the client until the move is complete. Otherwise will return
+        immediately.
 
+        This function is typically called repeatedly by the client (with wait=False) to drive the robot in response to
+        user input such as a panel button or joystick.
+
+        Robot must be in ``jog`` command mode to call this function.
+
+        This is an asynchronous function, and handler must be called to return result to the client.
+
+        :param joint_velocity: The desired joint velocity position in radians/s
+        :type joint_position: np.ndarray
+        :param timeout: The timeout to run at the specified velocity
+        :type timeout: float
+        :param wait: Wait for completion or return immediately
+        :type wait: bool
+        :param handler: Handler to call when function is complete
+        :type handler: Callable[[],Exception]
+        """
         with self._lock:
 
             if self._command_mode != self._robot_command_mode["jog"]:
@@ -949,6 +1304,13 @@ class AbstractRobot(ABC):
 
     @property
     def robot_info(self):
+        """
+        Returns the current ``RobotInfo`` structure. The ``RobotInfo`` structure will be updated with tool
+        and payload information as it changes.
+
+        :return: The populated RobotInfo structure
+        :rtype: RobotInfo
+        """
         with self._lock:
             
             for i in range(len(self._robot_info.chains)):
@@ -963,6 +1325,19 @@ class AbstractRobot(ABC):
             return self._robot_info
 
     def execute_trajectory(self, trajectory):
+        """
+        Called by the client to execute a trajectory. Must be in ``trajectory`` command mode.
+
+        This function returns a generator. The client must call ``Next()`` repeatedly on the generator
+        until the trajectory is complete.
+
+        The first waypoint on the trajectory must be reasonably close to the current robot position.
+
+        :param trajectory: The trajectory to execute
+        :type trajectory: JointTrajectory
+        :return: The trajectory generator, that must have ``Next()`` called repeatedly to execute trajectory
+        :rtype: TrajectoryStatus{generator}
+        """
         owner_ep = RR.ServerEndpoint.GetCurrentEndpoint()
 
         with self._lock:
@@ -994,6 +1369,9 @@ class AbstractRobot(ABC):
             return traj_task
 
     def _cancel_trajectory(self, trajectory):
+        """
+        Cancel a trajectory that is in the queue. Called from the trajectory generator if ``Close()`` is called.
+        """
 
         with self._lock:
             if trajectory is self._active_trajectory:
@@ -1014,42 +1392,97 @@ class AbstractRobot(ABC):
                     self._queued_trajectories.pop(t_index)
 
     def _abort_trajectory(self, trajectory):
+        """
+        Aborts trajectory and all trajectories by dropping to ``halt`` command made. Called by trajectory
+        generater if ``Abort()`` is called.
+        """
         self._command_mode = self._robot_command_mode["halt"]
 
     @property
     def speed_ratio(self):
+        """
+        Get the speed ratio
+        """
         return self._speed_ratio
 
     @speed_ratio.setter
     def speed_ratio(self, value):
+        """
+        Set the speed ratio. Can be used to reduce or increase speed of trajectory and other operations.
+        :param value: New speed ratio. Must be between 0.1 and 10
+        :type value: float
+        """
         if value < 0.1 or value > 10:
             raise RR.InvalidArgumentException("Invalid speed_ratio")
 
         self._speed_ratio = value
 
     @property
-    def operational_mode(self):        
+    def operational_mode(self):
+        """Return the current operational mode of the controller, if available"""
         return self._operation_mode
 
     def controller_state(self):
+        """Return the current state of the vendor robot controller, if available"""
         return self._controller_state
 
     def current_errors(self):
+        """Returns currently reported errors, if available"""
         return []
 
-    def jog_cartesian(self, velocity, timout, wait):
+    def jog_cartesian(self, velocity, timeout, wait):
+        """
+        Called by client to jog the robot at a specified cartesian velocity for a specified time. If wait
+        is True, the function will not return to the client until the move is complete. Otherwise will return
+        immediately.
+
+        This function is typically called repeatedly by the client (with wait=False) to drive the robot in response to
+        user input such as a panel button or joystick.
+
+        Robot must be in ``jog`` command mode to call this function.
+
+        This is an asynchronous function, and handler must be called to return result to the client.
+
+        :param velocity: The desired end effector spatial velocity position in meters/s,radians/s
+        :type joint_position: SpatialVelocity
+        :param timeout: The timeout to run at the specified velocity
+        :type timeout: float
+        :param wait: Wait for completion or return immediately
+        :type wait: bool
+        :param handler: Handler to call when function is complete
+        :type handler: Callable[[],Exception]
+        """
         raise RR.NotImplementedException("Not implemented")
 
     def async_home(self, handler):
+        """
+        Called by client to home the robot. Behavior is device specific.
+
+        Robot must be in ``homing`` command mode to call this function.
+
+        :param handler: Handler to call when function is complete
+        :type handler: Callable[[],Exception]
+        """
         raise RR.NotImplementedException()
 
-    def async_getf_signal(self, handler):
+    def async_getf_signal(self, signal_name, handler):
+        """Get the value of a signal. Optionally implemented by subclass"""
         raise RR.NotImplementedException()
 
-    def async_setf_signal(self, value, handler):
+    def async_setf_signal(self, signal_name, value, handler):
+        """Set the value of a signal. Optionally implemented by subclass"""
         raise RR.NotImplementedException()
 
     def tool_attached(self, chain, tool):
+        """
+        Called by client to notify the driver that a tool has been attached. TCP is used to compute endpoint position
+        and velocity. Implementing class may also update the vendor robot controller if necessary.
+
+        :param chain: The kinematic chain the tool has been attached
+        :type chain: int
+        :param tool: The ToolInfo structure of the tool, specified by the client
+        :type tool: ToolInfo
+        """
         if tool is None:
             raise RR.NullValueException("Tool cannot be null")
 
@@ -1072,6 +1505,13 @@ class AbstractRobot(ABC):
             self._config_seqno+=1
 
     def tool_detached(self, chain, tool_name):
+        """
+        Called by client to notify the driver that a tool has been detached. Payloads must be detached before
+        the tool can be detached.
+
+        :param payload_name: The name of the tool that was detached
+        :type payload_name: str
+        """
 
         if chain > 0 or not (chain < len(self._current_tool)):
             raise RR.InvalidArgumentException(f"Invalid kinematic chain {chain} for tool")
@@ -1099,6 +1539,19 @@ class AbstractRobot(ABC):
             self._config_seqno+=1
 
     def payload_attached(self, chain, payload, pose):
+        """
+        Called by client to notify the driver that a payload has been attached to the tool. A tool must be attached
+        to attach a payload. The pose between the payload and tool is also specified.
+        
+        Implementing class may also update the vendor robot controller if necessary.
+
+        :param chain: The kinematic chain the tool has been attached
+        :type chain: int
+        :param payload: The PayloadInfo structure of the tool, specified by the client
+        :type tool: PayloadInfo
+        :param pose: The pose of the payload relative to the tool TCP
+        :type pose: com.geometry.Pose
+        """
         if payload is None:
             raise RR.NullValueException("Payload cannot be null")
 
@@ -1125,6 +1578,12 @@ class AbstractRobot(ABC):
             self._config_seqno+=1
     
     def payload_detached(self, chain, payload_name):
+        """
+        Called by client to notify the driver that a payload has been detached
+
+        :param payload_name: The name of the payload that was detached
+        :type payload_name: str
+        """
         
         if chain > 0 or not (chain < len(self._current_payload)):
             raise RR.InvalidArgumentException(f"Invalid kinematic chain {chain} for payload")
@@ -1149,17 +1608,21 @@ class AbstractRobot(ABC):
             self._config_seqno+=1
 
     def getf_param(self, param_name):
+        """Get the value of a parameter. Optionally implemented by subclass"""
         raise RR.InvalidArgumentException("Invalid parameter")
 
     def setf_param(self, param_name, value):
+        """Set the value of a parameter. Optionally implemented by subclass"""
         raise RR.InvalidArgumentException("Invalid parameter")
 
     @property
     def device_info(self):
+        """Returns the DeviceInfo structure contained in RobotInfo"""
         return self._robot_info.device_info
 
     @property
     def isoch_info(self):
+        """Returns the IsochInfo structure"""
         iso_info = self._isoch_info_type()
         iso_info.update_rate = 1.0/self._update_period
         iso_info.max_downsample = 1000
@@ -1170,11 +1633,22 @@ class AbstractRobot(ABC):
 
     @property
     def isoch_downsample(self):
+        """Return the current client isoch_downsample level"""
         with self._lock:
             return self._broadcast_downsampler.GetClientDownsample(RR.ServerEndpoint.GetCurrentEndpoint())
 
     @isoch_downsample.setter
     def isoch_downsample(self, value):
+        """
+        Set the current client isoch_downsample level. By default, the wires and pipes will transmit
+        every timestep. The ``isoch_downsample`` property allows the client to request every ``n`` samples be dropped.
+        For instance, if ``isoch_downsample`` is set to 2, the driver will skip two timesteps, and only transmit on every
+        third timestep. Check ``isoch_info` to determine the native loop update rate in Hz.
+
+        :param value: The downsample level
+        :type value: int
+        
+        """
         with self._lock:
             self._broadcast_downsampler.SetClientDownsample(RR.ServerEndpoint.GetCurrentEndpoint(), value)
 
