@@ -394,10 +394,10 @@ class AbstractRobot(ABC):
         now = next_wait
 
         while self._keep_going:
-
+            
+            now = self._stopwatch_ellapsed_s()
             self._run_timestep(now)
 
-            now = self._stopwatch_ellapsed_s()
 
             while True:
                 next_wait += self._update_period
@@ -408,7 +408,7 @@ class AbstractRobot(ABC):
                 now = self._stopwatch_ellapsed_s()
                 if now >= next_wait:
                     break
-                self._wait_event.wait(timeout=(next_wait-now))
+                time.sleep(next_wait-now)
 
             
     def _close(self):

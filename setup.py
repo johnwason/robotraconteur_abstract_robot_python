@@ -2,7 +2,7 @@ from setuptools import setup, find_packages, find_namespace_packages
 
 setup(
     name='robotraconteur_abstract_robot',
-    version='0.2.0',
+    version='0.2.1',
     description='Robot Raconteur Python Abstract Robot and Abstract Tool',
     author='John Wason',
     author_email='wason@wasontech.com',
