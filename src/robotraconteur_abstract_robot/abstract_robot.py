@@ -19,7 +19,6 @@ Module containing ``AbstractRobot`` class. Robot Raconteur types are shortened f
 
 from enum import Enum
 import traceback
-from turtle import down
 import RobotRaconteur as RR
 RRN = RR.RobotRaconteurNode.s
 from RobotRaconteurCompanion.Util.RobotUtil import RobotUtil
