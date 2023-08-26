@@ -269,8 +269,8 @@ def test_fill_states():
         c._joint_position=np.array([0.5379, 0.4294, 0.4161, 0.7159, 0.4958, 0.4698])
         c._joint_velocity=np.array([0.1378, 0.7312, 0.044 , 0.5284, 0.1485, 0.494 ])
         c._joint_effort=np.array([0.2419, 0.9546, 0.6668, 0.1725, 0.5579, 0.9471])
-        c._joint_position_command=np.array([0.2441, 0.9979, 0.3714, 0.723 , 0.8448, 0.7268])
-        c._joint_velocity_command=np.array([0.1381, 0.9104, 0.0705, 0.091 , 0.643 , 0.4823])
+        c._position_command=np.array([0.2441, 0.9979, 0.3714, 0.723 , 0.8448, 0.7268])
+        c._velocity_command=np.array([0.1381, 0.9104, 0.0705, 0.091 , 0.643 , 0.4823])
 
         geom_util = GeometryUtil(c1.node)
 
