@@ -1474,23 +1474,17 @@ class AbstractRobot(ABC):
 
     def home(self):
         """
-        Called by client to home the robot. Returns a generator of ``ActionStatusCode``. Behavior is device
-        specific, so a subclass for a robot with the ``homing_command`` capability must implement this function.
+        Called by client to home the robot. Behavior is device specific, so a subclass for a robot with the
+        ``homing_command`` capability must implement this function.
+
+        Robot must be in ``homing`` command mode to call this function.
+
+        Robot Raconteur only uses ``async_`` functions for members that are not generators, so this function
+        must return a generator of ``ActionStatusCode`` directly.
         """
         if not self._uses_homing:
             raise RR.InvalidOperationException("Robot does not support homing")
         raise RR.NotImplementedException("Homing is not implemented by this driver")
-
-    def async_home(self, handler):
-        """
-        Called by client to home the robot. Behavior is device specific.
-
-        Robot must be in ``homing`` command mode to call this function.
-
-        :param handler: Handler to call when function is complete
-        :type handler: Callable[[],Exception]
-        """
-        raise RR.NotImplementedException()
 
     def async_getf_signal(self, signal_name, handler):
         """Get the value of a signal. Optionally implemented by subclass"""
