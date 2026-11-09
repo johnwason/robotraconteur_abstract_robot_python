@@ -4,7 +4,9 @@ from robotraconteur_abstract_robot import AbstractRobot
 import RobotRaconteur as RR
 import RobotRaconteurCompanion as RRC
 import numpy.testing as nptest
+import pytest
 import time
+from types import SimpleNamespace
 from RobotRaconteurCompanion.Util.UuidUtil import UuidUtil
 import general_robotics_toolbox as rox
 from RobotRaconteurCompanion.Util.GeometryUtil import GeometryUtil
@@ -345,6 +347,53 @@ def test_fill_states():
         assert sensor_data.robot_state.config_seqno == 1
 
         assert sensor_data.data_header.seqno == c._state_seqno
+
+def test_status_properties():
+    with _test_robot_container() as c1:
+        client = c1.connect_client()
+        c = c1.robot_obj
+        c._operational_mode = c._robot_operational_mode["cobot"]
+        c._controller_state = c._robot_controller_state["motor_on"]
+        assert client.operational_mode == c._robot_operational_mode["cobot"]
+        assert client.controller_state == c._robot_controller_state["motor_on"]
+        assert len(client.current_errors) == 0
+
+def test_halt():
+    with _test_robot_container() as c1:
+        client = c1.connect_client()
+        c = c1.robot_obj
+
+        c._command_mode = c._robot_command_mode["trajectory"]
+        client.halt()
+        assert c._command_mode == c._robot_command_mode["halt"]
+
+        c._command_mode = c._robot_command_mode["invalid_state"]
+        client.halt()
+        assert c._command_mode == c._robot_command_mode["invalid_state"]
+
+def test_home_not_supported():
+    with _test_robot_container() as c1:
+        client = c1.connect_client()
+        with pytest.raises(RR.InvalidOperationException):
+            client.home()
+
+def test_velocity_command():
+    with _test_robot_container() as c1:
+        c = c1.robot_obj
+        command = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+        cmd = SimpleNamespace(seqno=5, state_seqno=c._state_seqno, command=command, units=[])
+        c.velocity_command = SimpleNamespace(TryGetInValue=lambda: (True, cmd, None, 1))
+        c._command_mode = c._robot_command_mode["velocity_command"]
+
+        res, pos_cmd, vel_cmd = c._fill_robot_command(time.perf_counter())
+
+        assert res
+        assert pos_cmd is None
+        nptest.assert_allclose(vel_cmd, command)
+        assert c._wire_velocity_command_sent
+        assert not c._wire_position_command_sent
+        assert c._wire_velocity_command_last_seqno == 5
+        assert c._wire_position_command_last_seqno == 0
 
 def test_verify_communication():
     with _test_robot_container() as c1:

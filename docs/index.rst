@@ -452,14 +452,15 @@
 
       Get the value of a signal. Optionally implemented by subclass
 
-   **async_home(handler)**
+   **home()**
 
-      Called by client to home the robot. Behavior is device specific.
+      Called by client to home the robot. Behavior is device specific, so a subclass for a robot with the
+      ``homing_command`` capability must implement this function.
 
       Robot must be in ``homing`` command mode to call this function.
 
-      :Parameters:      
-         **handler** (*Callable**[**[**]**,**Exception**]*) – Handler to call when function is complete
+      Robot Raconteur only uses ``async_`` functions for members that are not generators, so this function
+      must return a generator of ``ActionStatusCode`` directly.
 
    **async_jog_freespace(joint_position, max_velocity, wait, handler)**
 

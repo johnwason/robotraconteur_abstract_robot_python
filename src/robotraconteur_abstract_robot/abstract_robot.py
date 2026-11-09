@@ -284,7 +284,7 @@ class AbstractRobot(ABC):
 
         self._command_mode = self._robot_command_mode["halt"]
         self._operational_mode = self._robot_operational_mode["manual_reduced_speed"]
-        self._controller_state = self._robot_operational_mode["undefined"]
+        self._controller_state = self._robot_controller_state["undefined"]
 
         self._joint_position = np.zeros((0,))
         self._joint_velocity = np.zeros((0,))
@@ -922,7 +922,7 @@ class AbstractRobot(ABC):
 
             if vel_cmd is None \
                 or vel_cmd.seqno < self._wire_velocity_command_last_seqno \
-                or abs(vel_cmd.stat_seqno - self._state_seqno) > 10 \
+                or abs(vel_cmd.state_seqno - self._state_seqno) > 10 \
                 or len(vel_cmd.command) != self._joint_count \
                 or len(vel_cmd.units) != 0 and len(vel_cmd.units) != self._joint_count:
                     return True, None, None
@@ -945,12 +945,12 @@ class AbstractRobot(ABC):
                     else:
                         return True, None, None
 
-            self._wire_position_command_last_seqno = vel_cmd.seqno
+            self._wire_velocity_command_last_seqno = vel_cmd.seqno
 
             if self._speed_ratio != 1.0:
                 vel_cmd_j *= self._speed_ratio
 
-            self._wire_position_command_sent = True
+            self._wire_velocity_command_sent = True
             return True, None, vel_cmd_j
 
         elif self._command_mode == self._robot_command_mode["trajectory"]:
@@ -1427,12 +1427,14 @@ class AbstractRobot(ABC):
     @property
     def operational_mode(self):
         """Return the current operational mode of the controller, if available"""
-        return self._operation_mode
+        return self._operational_mode
 
+    @property
     def controller_state(self):
         """Return the current state of the vendor robot controller, if available"""
         return self._controller_state
 
+    @property
     def current_errors(self):
         """Returns currently reported errors, if available"""
         return []
@@ -1461,16 +1463,28 @@ class AbstractRobot(ABC):
         """
         raise RR.NotImplementedException("Not implemented")
 
-    def async_home(self, handler):
+    def halt(self):
         """
-        Called by client to home the robot. Behavior is device specific.
+        Called by client to stop any motion in progress by dropping to ``halt`` command mode. A robot in
+        ``invalid_state`` is left in that state.
+        """
+        with self._lock:
+            if self._command_mode != self._robot_command_mode["invalid_state"]:
+                self._command_mode = self._robot_command_mode["halt"]
+
+    def home(self):
+        """
+        Called by client to home the robot. Behavior is device specific, so a subclass for a robot with the
+        ``homing_command`` capability must implement this function.
 
         Robot must be in ``homing`` command mode to call this function.
 
-        :param handler: Handler to call when function is complete
-        :type handler: Callable[[],Exception]
+        Robot Raconteur only uses ``async_`` functions for members that are not generators, so this function
+        must return a generator of ``ActionStatusCode`` directly.
         """
-        raise RR.NotImplementedException()
+        if not self._uses_homing:
+            raise RR.InvalidOperationException("Robot does not support homing")
+        raise RR.NotImplementedException("Homing is not implemented by this driver")
 
     def async_getf_signal(self, signal_name, handler):
         """Get the value of a signal. Optionally implemented by subclass"""
