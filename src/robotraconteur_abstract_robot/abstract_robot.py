@@ -1744,7 +1744,7 @@ class TrajectoryTask:
         with self._lock:
             for c in self._queue_wait_handler:
                 self._node.PostToThreadPool(lambda c=c, err=err: c(err))
-            self._next_wait_handler.clear()
+            self._queue_wait_handler.clear()
 
     def Abort(self):
         self._aborted = True
@@ -1784,7 +1784,8 @@ class TrajectoryTask:
                     complete_called[0] = True
                 if err:
                     handler(None, err)
-                
+                    return
+
                 if not self._started:
                     # Still queued...
 
@@ -1814,6 +1815,12 @@ class TrajectoryTask:
                     ret.seqno = self._parent._state_seqno
                     handler(ret,None)
                     return
+
+            if self._finished:
+                # The motion has already ended, so the waiting handlers have already been called.
+                # Answer at once, rather than when the timer fires
+                self._node.PostToThreadPool(lambda: complete(None))
+                return
 
             if self._queued:
                 self._next_wait_handler.append(complete)
