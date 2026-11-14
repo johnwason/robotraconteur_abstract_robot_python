@@ -510,6 +510,19 @@ class AbstractRobot(ABC):
 
         return f
 
+    def _chain_value(self, values, chain, dtype):
+        """
+        The value of one chain from ``_endpoint_pose`` or ``_endpoint_vel``, as a one-element array, which
+        ``GeometryUtil`` expects. Drivers set these either as a list with one one-element array per chain, or as
+        an array with one element per chain, as the example driver does, whose entry is a single element
+
+        :param values: ``_endpoint_pose`` or ``_endpoint_vel``
+        :param chain: The chain index
+        :param dtype: The named array type of the values
+        :return: The chain's value as a one-element array
+        """
+        return np.asarray(values[chain], dtype=dtype).reshape((1,))
+
     def _calc_endpoint_pose(self, chain):
         """
         Compute endpoint pose for specified chain. By default uses ``_endpoint_pose[chain]`` and transforms
@@ -527,7 +540,8 @@ class AbstractRobot(ABC):
         if self._current_tool[chain] is None:
             return self._endpoint_pose[chain]
 
-        endpoint_transform = self._geometry_util.pose_to_rox_transform(self._endpoint_pose[chain])
+        endpoint_transform = self._geometry_util.pose_to_rox_transform(
+            self._chain_value(self._endpoint_pose, chain, self._pose_dtype))
         tool_transform = self._geometry_util.transform_to_rox_transform(self._current_tool[chain].tcp)
         res = endpoint_transform * tool_transform
         return self._geometry_util.rox_transform_to_pose(res)
@@ -566,17 +580,19 @@ class AbstractRobot(ABC):
         if self._current_tool[chain] is None:
             return self._endpoint_vel[chain]
 
-        endpoint_vel = self._geometry_util.spatial_velocity_to_array(self._endpoint_vel).flatten()
+        endpoint_vel = self._geometry_util.spatial_velocity_to_array(
+            self._chain_value(self._endpoint_vel, chain, self._spatial_velocity_dtype)).flatten()
         endpoint_vel_ang = endpoint_vel[0:3]
-        endpoint_vel_lin = endpoint_vel[3:7]
+        endpoint_vel_lin = endpoint_vel[3:6]
         current_tool_p = self._geometry_util.point_to_xyz(self._current_tool[chain].tcp["translation"])
 
-        endpoint_transform = self._geometry_util.pose_to_rox_transform(self._endpoint_pose[chain])
+        endpoint_transform = self._geometry_util.pose_to_rox_transform(
+            self._chain_value(self._endpoint_pose, chain, self._pose_dtype))
 
         
         vel = endpoint_vel_lin + np.cross(endpoint_vel_ang, np.matmul(endpoint_transform.R, current_tool_p))
 
-        return self._geometry_util.array_to_spatial_acceleration(np.concatenate((endpoint_vel_ang, vel)))
+        return self._geometry_util.array_to_spatial_velocity(np.concatenate((endpoint_vel_ang, vel)))
 
     def _calc_endpoint_vels(self):
         """
@@ -1546,7 +1562,7 @@ class AbstractRobot(ABC):
 
             if len(tool_name) > 0:                
                 try:
-                    device_name = self._current_tool.device_info.device.name
+                    device_name = self._current_tool[chain].device_info.device.name
                 except:
                     traceback.print_exc()
                     device_name = ""

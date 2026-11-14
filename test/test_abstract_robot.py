@@ -252,6 +252,47 @@ def test_calc_endpoint_vel():
         nptest.assert_allclose(res1, [0.01      , 0.02      , 0.03      , 0.04020604, 0.0499125 ,
             0.05998965], atol=1e-4)
 
+def test_calc_endpoint_with_tool_from_array_per_chain():
+    # The example driver sets _endpoint_pose as an array with one element per chain, rather than a list of
+    # one-element arrays, so each chain's entry is a single element. The tool transform must accept it
+    with _test_robot_container() as c1:
+        c = c1.robot_obj
+        geom_util = GeometryUtil(c1.node)
+        pose1 = geom_util.xyz_rpy_to_pose([0.1,0.2,0.3],[0.0233,0.04,0.06])
+        vel1 = geom_util.array_to_spatial_velocity([0.01,0.02,0.03,0.04,0.05,0.06])
+        tool1 = c1.node.NewStructure("com.robotraconteur.robotics.tool.ToolInfo")
+        tool1.tcp = geom_util.xyz_rpy_to_transform([0,0,0.01],[0.009,0.008,0.007])
+        c._current_tool = [tool1]
+
+        c._endpoint_pose = [pose1]
+        c._endpoint_vel = [vel1]
+        expected_pose = c1.node.NamedArrayToArray(c._calc_endpoint_poses()).flatten()
+        expected_vel = c1.node.NamedArrayToArray(c._calc_endpoint_vels()).flatten()
+
+        c._endpoint_pose = np.concatenate([pose1])
+        c._endpoint_vel = np.concatenate([vel1])
+        assert c._endpoint_pose.shape == (1,)
+        nptest.assert_allclose(c1.node.NamedArrayToArray(c._calc_endpoint_poses()).flatten(), expected_pose)
+        nptest.assert_allclose(c1.node.NamedArrayToArray(c._calc_endpoint_vels()).flatten(), expected_vel)
+
+def test_tool_detached_by_name():
+    with _test_robot_container() as c1:
+        c = c1.robot_obj
+        geom_util = GeometryUtil(c1.node)
+        tool1 = c1.node.NewStructure("com.robotraconteur.robotics.tool.ToolInfo")
+        tool1.tcp = geom_util.xyz_rpy_to_transform([0,0,0.01],[0,0,0])
+        tool1.device_info = c1.node.NewStructure("com.robotraconteur.device.DeviceInfo")
+        tool1.device_info.device = c1.node.NewStructure("com.robotraconteur.identifier.Identifier")
+        tool1.device_info.device.name = "gripper"
+        c.tool_attached(0, tool1)
+
+        with pytest.raises(RR.InvalidArgumentException):
+            c.tool_detached(0, "other_tool")
+        assert c._current_tool[0] is tool1
+
+        c.tool_detached(0, "gripper")
+        assert c._current_tool[0] is None
+
 def test_fill_states():
     with _test_robot_container() as c1:
         c = c1.robot_obj
