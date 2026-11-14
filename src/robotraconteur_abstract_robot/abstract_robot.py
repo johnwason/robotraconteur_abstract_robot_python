@@ -986,7 +986,7 @@ class AbstractRobot(ABC):
                      send_traj_cmd = True
                 elif interp_res == TrajectoryTaskRes.trajectory_complete:
                     self._trajectory_valid = True
-                    send_traj_comd = True
+                    send_traj_cmd = True
                     self._active_trajectory = None
                     if len(self._queued_trajectories) > 0:
                         self._active_trajectory = self._queued_trajectories.pop(0)
@@ -1728,6 +1728,9 @@ class TrajectoryTask:
 
         self._traj_t = 0.0
         self._traj_waypoint = 0
+        # The timer that answers a waiting Next with a running status. Kept here, since a timer that
+        # nothing refers to can be collected before it fires, and that Next would then wait to the end
+        self._next_timer = None
 
         self._lock = threading.Lock()
 
@@ -1741,7 +1744,7 @@ class TrajectoryTask:
         with self._lock:
             for c in self._queue_wait_handler:
                 self._node.PostToThreadPool(lambda c=c, err=err: c(err))
-            self._next_wait_handler.clear()
+            self._queue_wait_handler.clear()
 
     def Abort(self):
         self._aborted = True
@@ -1781,7 +1784,8 @@ class TrajectoryTask:
                     complete_called[0] = True
                 if err:
                     handler(None, err)
-                
+                    return
+
                 if not self._started:
                     # Still queued...
 
@@ -1812,14 +1816,20 @@ class TrajectoryTask:
                     handler(ret,None)
                     return
 
+            if self._finished:
+                # The motion has already ended, so the waiting handlers have already been called.
+                # Answer at once, rather than when the timer fires
+                self._node.PostToThreadPool(lambda: complete(None))
+                return
+
             if self._queued:
                 self._next_wait_handler.append(complete)
                 self._queue_wait_handler.append(complete)
             else:
                 self._next_wait_handler.append(complete)
 
-            timer = self._node.CreateTimer(5, lambda _: complete(None), True)
-            timer.Start()
+            self._next_timer = self._node.CreateTimer(5, lambda _: complete(None), True)
+            self._next_timer.Start()
 
     def _cancelled_in_queue(self):
         self._cancelled = True
@@ -1857,7 +1867,11 @@ class TrajectoryTask:
 
         if not self._next_called:
             return TrajectoryTaskRes.ready, None, None, 0.0, self._path.max_time, 0
-        
+
+        # Kept on every setpoint, so that a running status gives the progress, not only the final one
+        self._traj_t = t
+        self._traj_waypoint = current_waypoint1
+
         if t > self._path.max_time:
             self._traj_t = t
             self._traj_waypoint = current_waypoint1
